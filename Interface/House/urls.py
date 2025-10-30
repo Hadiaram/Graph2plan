@@ -15,11 +15,15 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from django.views.generic import RedirectView
 
 from Houseweb import views
 
 urlpatterns = [
     # path('admin/', admin.site.urls),
+    # Redirect root to home page
+    path('', RedirectView.as_view(url='/home', permanent=False)),
+
     path('index/LoadTestBoundary', views.LoadTestBoundary),
     path('index/NumSearch/', views.NumSearch),
     path(r'index/LoadTrainHouse/', views.LoadTrainHouse),

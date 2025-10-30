@@ -1,0 +1,48 @@
+# Python envs & caches
+g2p-env/
+g2p-train-env/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Big artifacts (adjust if you actually need some tracked via LFS)
+*.dll
+*.lib
+*.so
+*.dylib
+*.pt
+*.pth
+*.onnx
+*.zip
+*.mp4
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env
+
+# Data folders
+Interface/static/Data/
+Interface/retrieval/
+Network/data/
+data/
+datasets/
+
+# Big binary artifacts
+*.npy
+*.npz
+*.pkl
+*.mat
+*.pt
+*.pth
+*.onnx
+
+# Caches / misc
+__pycache__/
+*.pyc

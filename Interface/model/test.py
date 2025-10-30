@@ -9,7 +9,15 @@ import Houseweb.views as vw
 import numpy as np
 import time
 import math
-import matlab.engine
+import warnings
+
+# Try to import MATLAB - make it optional
+HAS_MATLAB = False
+try:
+    import matlab.engine
+    HAS_MATLAB = True
+except ImportError:
+    warnings.warn("MATLAB engine not available in test.py. Using Python fallback.", UserWarning)
   
 
 global adjust,indxlist
@@ -203,26 +211,34 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     rBox = boxes_pred[:]
     Box = [[float(x), float(y), float(z), float(k)] for x, y, z, k in rBox]
 
-    boundary_mat = matlab.double(boundary)
-    rNode_mat = matlab.double(rNode.tolist())
-    print("rNode.tolist()",rNode.tolist())
-    Edge_mat = matlab.double(Edge)
-    
-    Box_mat=matlab.double(Box)
-    
     fp_end.data.boundary =np.array(boundary)
     fp_end.data.rType =np.array(rNode).astype(int)
     fp_end.data.refineBox=np.array(Box)
     fp_end.data.rEdge=np.array(Edge)
-    gene_mat=matlab.double(np.array(fp_end.data.gene).tolist())
-    startcom= time.clock()
-    box_refine =  vw.engview.align_fp(boundary_mat, Box_mat,  rNode_mat,Edge_mat,matlab.double(fp_end.data.gene.astype(float).copy().tolist()) ,18,False, nargout=3)
-    endcom = time.clock()
-    print(' matlab.compute time: %s Seconds' % (endcom - startcom))
-    box_out=box_refine[0]
-    box_order=box_refine[1]
 
-    rBoundary=box_refine[2]
+    startcom = time.clock()
+    if vw.engview is not None and HAS_MATLAB:
+        # Use MATLAB alignment
+        boundary_mat = matlab.double(boundary)
+        rNode_mat = matlab.double(rNode.tolist())
+        print("rNode.tolist()",rNode.tolist())
+        Edge_mat = matlab.double(Edge)
+        Box_mat = matlab.double(Box)
+        gene_mat = matlab.double(np.array(fp_end.data.gene).tolist())
+
+        box_refine = vw.engview.align_fp(boundary_mat, Box_mat, rNode_mat, Edge_mat,
+                                         matlab.double(fp_end.data.gene.astype(float).copy().tolist()),
+                                         18, False, nargout=3)
+        box_out = box_refine[0]
+        box_order = box_refine[1]
+        rBoundary = box_refine[2]
+    else:
+        # Use Python fallback from views module
+        print("Using Python fallback for alignment")
+        box_out, box_order, rBoundary = vw._python_fallback_align(boundary, Box, rNode.tolist(), Edge, 18)
+
+    endcom = time.clock()
+    print(' alignment compute time: %s Seconds' % (endcom - startcom))
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]

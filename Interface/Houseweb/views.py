@@ -12,12 +12,57 @@ import numpy as np
 from model.decorate import *
 import math
 import pandas as pd
-import matlab.engine
+import warnings
+
+# Try to import MATLAB - make it optional
+HAS_MATLAB = False
+try:
+    import matlab.engine
+    HAS_MATLAB = True
+except ImportError:
+    warnings.warn("MATLAB engine not available. Some features may be limited.", UserWarning)
 
 global test_data, test_data_topk, testNameList, trainNameList
 global train_data, trainNameList, trainTF, train_data_eNum, train_data_rNum
 global engview, model
 global tf_train, centroids, clusters
+
+
+def _python_fallback_align(boundary, boxes, types, edges, threshold):
+    """
+    Python fallback for MATLAB align_fp when MATLAB is not available.
+    Returns boxes without complex alignment.
+    """
+    boxes = np.array(boxes)
+    types = np.array(types)
+
+    # Simple ordering: sort by y-coordinate (top to bottom), then x-coordinate (left to right)
+    if len(boxes) > 0:
+        centers_x = np.array([(boxes[i][0] + boxes[i][2]) / 2 for i in range(len(boxes))])
+        centers_y = np.array([(boxes[i][1] + boxes[i][3]) / 2 for i in range(len(boxes))])
+        order = np.argsort(centers_y * 1000 + centers_x) + 1  # MATLAB uses 1-indexing
+        order = order.reshape(-1, 1)
+    else:
+        order = np.array([[]], dtype=int)
+
+    # Generate simple room boundaries (just bounding boxes)
+    room_boundaries = []
+    for box in boxes:
+        if len(box) >= 4:
+            x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+            # Create a rectangle as the room boundary
+            boundary_poly = [
+                [x1, y1],
+                [x2, y1],
+                [x2, y2],
+                [x1, y2],
+                [x1, y1]
+            ]
+            room_boundaries.append(boundary_poly)
+        else:
+            room_boundaries.append([[]])
+
+    return boxes.tolist(), order.tolist(), room_boundaries
 
 
 def home(request):
@@ -40,10 +85,20 @@ def Init(request):
 def loadMatlabEng():
     startengview = time.clock()
     global engview
-    engview = matlab.engine.start_matlab()
-    engview.addpath(r'./align_fp/', nargout=0)
-    endengview = time.clock()
-    print(' matlab.engineview time: %s Seconds' % (endengview - startengview))
+    if HAS_MATLAB:
+        try:
+            engview = matlab.engine.start_matlab()
+            engview.addpath(r'./align_fp/', nargout=0)
+            endengview = time.clock()
+            print(' matlab.engineview time: %s Seconds' % (endengview - startengview))
+            print('MATLAB engine initialized successfully')
+        except Exception as e:
+            engview = None
+            warnings.warn(f"Failed to initialize MATLAB engine: {e}. "
+                         "Using Python fallback for alignment.", UserWarning)
+    else:
+        engview = None
+        print('MATLAB not available - using Python fallback for alignment')
 
 
 def loadRetrieval():
@@ -577,19 +632,24 @@ def Save_Editbox(request):
     rEdge = fp_end.get_triples(tensor=False)[:, [0, 2, 1]]
     Edge = [[float(u), float(v), float(type2)] for u, v, type2 in rEdge]
     Box=NewLay
-    boundary_mat = matlab.double(boundary)
-    rType_mat = matlab.double(rType.tolist())
-    Edge_mat = matlab.double(Edge)
-    Box_mat=matlab.double(Box)
     fp_end.data.boundary =np.array(boundary)
     fp_end.data.rType =np.array(rType).astype(int)
     fp_end.data.refineBox=np.array(Box)
     fp_end.data.rEdge=np.array(Edge)
 
-    box_refine = engview.align_fp(boundary_mat, Box_mat,  rType_mat,Edge_mat ,18,False, nargout=3)
-    box_out=box_refine[0]
-    box_order=box_refine[1]
-    rBoundary=box_refine[2]
+    if engview is not None and HAS_MATLAB:
+        # Use MATLAB alignment
+        boundary_mat = matlab.double(boundary)
+        rType_mat = matlab.double(rType.tolist())
+        Edge_mat = matlab.double(Edge)
+        Box_mat = matlab.double(Box)
+        box_refine = engview.align_fp(boundary_mat, Box_mat,  rType_mat, Edge_mat, 18, False, nargout=3)
+        box_out = box_refine[0]
+        box_order = box_refine[1]
+        rBoundary = box_refine[2]
+    else:
+        # Use Python fallback
+        box_out, box_order, rBoundary = _python_fallback_align(boundary, Box, rType.tolist(), Edge, 18)
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]

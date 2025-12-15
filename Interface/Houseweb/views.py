@@ -70,26 +70,26 @@ def home(request):
 
 
 def Init(request):
-    start = time.clock()
+    start = time.perf_counter()
     getTestData()
     getTrainData()
     loadMatlabEng()
     loadModel()
     loadRetrieval()
-    end = time.clock()
+    end = time.perf_counter()
     print('Init(model+test+train+engine+retrieval) time: %s Seconds' % (end - start))
 
     return HttpResponse(None)
 
 
 def loadMatlabEng():
-    startengview = time.clock()
+    startengview = time.perf_counter()
     global engview
     if HAS_MATLAB:
         try:
             engview = matlab.engine.start_matlab()
             engview.addpath(r'./align_fp/', nargout=0)
-            endengview = time.clock()
+            endengview = time.perf_counter()
             print(' matlab.engineview time: %s Seconds' % (endengview - startengview))
             print('MATLAB engine initialized successfully')
         except Exception as e:
@@ -103,55 +103,55 @@ def loadMatlabEng():
 
 def loadRetrieval():
     global tf_train, centroids, clusters
-    t1 = time.clock()
-    tf_train = np.load('./retrieval/tf_train.npy')
-    centroids = np.load('./retrieval/centroids_train.npy')
-    clusters = np.load('./retrieval/clusters_train.npy')
-    t2 = time.clock()
+    t1 = time.perf_counter()
+    tf_train = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\tf_train.npy')
+    centroids = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\centroids_train.npy')
+    clusters = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\clusters_train.npy')
+    t2 = time.perf_counter()
     print('load tf/centroids/clusters', t2 - t1)
 
 
 def getTestData():
-    start = time.clock()
+    start = time.perf_counter()
     global test_data, testNameList, trainNameList
  
-    test_data = pickle.load(open('./static/Data/data_test_converted.pkl', 'rb'))
+    test_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_converted.pkl', 'rb'))
     test_data, testNameList, trainNameList = test_data['data'], list(test_data['testNameList']), list(
         test_data['trainNameList'])
-    end = time.clock()
+    end = time.perf_counter()
     print('getTestData time: %s Seconds' % (end - start))
 
 
 def getTrainData():
-    start = time.clock()
+    start = time.perf_counter()
     global train_data, trainNameList, trainTF, train_data_eNum, train_data_rNum
     
-    train_data = pickle.load(open('./static/Data/data_train_converted.pkl', 'rb'))
+    train_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_converted.pkl', 'rb'))
     train_data, trainNameList, trainTF = train_data['data'], list(train_data['nameList']), list(train_data['trainTF'])
     
-    train_data_eNum = pickle.load(open('./static/Data/data_train_eNum.pkl', 'rb'))
+    train_data_eNum = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_eNum.pkl', 'rb'))
     train_data_eNum = train_data_eNum['eNum']
-    train_data_rNum = np.load('./static/Data/rNum_train.npy')
+    train_data_rNum = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\rNum_train.npy')
 
-    end = time.clock()
+    end = time.perf_counter()
     print('getTrainData time: %s Seconds' % (end - start))
 
 
 def loadModel():
     global model, train_data, trainNameList
-    start = time.clock()
+    start = time.perf_counter()
     model = mltest.load_model()
-    end = time.clock()
+    end = time.perf_counter()
     print('loadModel time: %s Seconds' % (end - start))
-    start = time.clock()
+    start = time.perf_counter()
     test = train_data[trainNameList.index("75119")]
     mltest.test(model, FloorPlan(test, train=True))
-    end = time.clock()
+    end = time.perf_counter()
     print('test Model time: %s Seconds' % (end - start))
 
 
 def LoadTestBoundary(request):
-    start = time.clock()
+    start = time.perf_counter()
     testName = request.GET.get('testName').split(".")[0]
     test_index = testNameList.index(testName)
     data = test_data[test_index]
@@ -162,7 +162,7 @@ def LoadTestBoundary(request):
     for i in range(len(data.boundary)):
         ex = ex + str(data.boundary[i][0]) + "," + str(data.boundary[i][1]) + " "
     data_js['exterior'] = ex
-    end = time.clock()
+    end = time.perf_counter()
     print('LoadTestBoundary time: %s Seconds' % (end - start))
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
@@ -194,8 +194,9 @@ def filter_graph(graph_):
 
 
 def NumSearch(request):
-    start = time.clock()
+    start = time.perf_counter()
     data_new = json.loads(request.GET.get("userInfo"))
+    getTestData()
     testName = data_new[0].split(".")[0]
     test_index = testNameList.index(testName)
     topkList = []
@@ -204,6 +205,9 @@ def NumSearch(request):
 
    
     multi_clusters=False
+    loadRetrieval()
+    getTestData()
+    getTrainData()
     test_data_topk = rt.retrieval(data, 1000,multi_clusters)
     
     if len(data_new) > 1:
@@ -222,13 +226,13 @@ def NumSearch(request):
         topkList.clear()
         for i in range(topk):
             topkList.append(str(trainNameList[int(test_data_topk[indices[0][i]])]) + ".png")
-    end = time.clock()
+    end = time.perf_counter()
     print('NumberSearch time: %s Seconds' % (end - start))
     return HttpResponse(json.dumps(topkList), content_type="application/json")
 
 
 def FindTraindata(trainname):
-    start = time.clock()
+    start = time.perf_counter()
     train_index = trainNameList.index(trainname)
     data = train_data[train_index]
     data_js = {}
@@ -265,7 +269,7 @@ def FindTraindata(trainname):
 
     data_js["rmpos"] = [[int(cate), str(mdul.room_label[cate][1]), float((x1 + x2) / 2), float((y1 + y2) / 2)] for
                         x1, y1, x2, y2, cate in data.box[:]]
-    end = time.clock()
+    end = time.perf_counter()
     print('find train data time: %s Seconds' % (end - start))
     return data_js
 
@@ -282,7 +286,7 @@ def LoadTrainHouse(request):
 
 
 def TransGraph(request):
-    start = time.clock()
+    start = time.perf_counter()
     userInfo = request.GET.get("userInfo")
     testname = userInfo.split(',')[0]
     trainname = request.GET.get("roomID")
@@ -326,22 +330,22 @@ def TransGraph(request):
     data_js['exterior'] = ex
     data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
         data.boundary[1][0]) + "," + str(data.boundary[1][1])
-    end = time.clock()
+    end = time.perf_counter()
     print('TransGraph time: %s Seconds' % (end - start))
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
 def AdjustGraph(request):
-    start = time.clock()
+    start = time.perf_counter()
     # newNode index-typename-cx-cy
     # oldNode index-typename-cx-cy
     # newEdge u-v
     NewGraph = json.loads(request.GET.get("NewGraph"))
     testname = request.GET.get("userRoomID")
     trainname = request.GET.get("adptRoomID")
-    s = time.clock()
+    s = time.perf_counter()
     mlresult = mltest.get_userinfo_adjust(testname, trainname, NewGraph)
-    e = time.clock()
+    e = time.perf_counter()
     print('get_userinfo_adjust: %s Seconds' % (e - s))
     fp_end = mlresult[0]
     global boxes_pred
@@ -466,7 +470,7 @@ def AdjustGraph(request):
     
     sio.savemat("./static/" + testname.split(',')[0].split('.')[0] + ".mat", {"data": fp_end.data})
 
-    end = time.clock()
+    end = time.perf_counter()
     print('AdjustGraph time: %s Seconds' % (end - start))
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
@@ -703,7 +707,7 @@ def TransGraph_net(request):
 
 
 def GraphSearch(request):
-    s=time.clock()
+    s=time.perf_counter()
     # Graph
     Searchtype = ["BedRoom", "Bathroom", "Kitchen", "Balcony", "Storage"]
     BedRoomlist = ["MasterRoom", "SecondRoom", "GuestRoom", "ChildRoom", "StudyRoom"]
@@ -793,7 +797,7 @@ def GraphSearch(request):
     for i in range(topk):
         topkList.append(str(re_data[i].name) + ".png")
         
-    e=time.clock()
+    e=time.perf_counter()
     print('Graph Search time: %s Seconds' % (e - s))
 
     print("topkList", topkList)

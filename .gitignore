@@ -28,8 +28,6 @@ Thumbs.db
 .env
 
 # Data folders
-Interface/static/Data/
-Interface/retrieval/
 Network/data/
 data/
 datasets/

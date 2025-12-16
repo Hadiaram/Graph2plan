@@ -325,21 +325,29 @@ def load_and_explore_pickle(pkl_path: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert MATLAB .mat files to Python-friendly formats'
+        description='Convert MATLAB .mat files to Python-friendly formats',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Inspect a .mat file
+  python convert_mat_to_python.py data.mat --inspect
+
+  # Convert to pickle
+  python convert_mat_to_python.py data.mat --to-pickle output.pkl
+
+  # Convert to JSON
+  python convert_mat_to_python.py data.mat --to-json output.json
+
+  # Explore a pickle file
+  python convert_mat_to_python.py data.pkl --explore-pickle
+        """
     )
 
-    subparsers = parser.add_subparsers(dest='command', help='Command to run')
-
-    # Inspect command
-    inspect_parser = subparsers.add_parser('inspect', help='Inspect .mat file structure')
-    inspect_parser.add_argument('mat_file', help='Path to .mat file')
-    inspect_parser.add_argument('--verbose', action='store_true',
-                               help='Show detailed information')
-
-    # Standalone mode (backward compatibility)
-    parser.add_argument('input_file', nargs='?', help='Input file (.mat or .pkl)')
+    parser.add_argument('input_file', help='Input file (.mat or .pkl)')
     parser.add_argument('--inspect', action='store_true',
                        help='Inspect file structure')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Show detailed information (with --inspect)')
     parser.add_argument('--to-pickle', metavar='OUTPUT',
                        help='Convert to pickle format')
     parser.add_argument('--to-json', metavar='OUTPUT',
@@ -353,16 +361,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Handle subcommands
-    if args.command == 'inspect':
-        inspect_mat_file(args.mat_file, args.verbose)
-        return
-
-    # Handle standalone mode
-    if not args.input_file:
-        parser.print_help()
-        return
-
     input_path = Path(args.input_file)
     if not input_path.exists():
         print(f"Error: File not found: {args.input_file}")
@@ -370,7 +368,7 @@ def main():
 
     if args.inspect:
         if input_path.suffix == '.mat':
-            inspect_mat_file(str(input_path))
+            inspect_mat_file(str(input_path), args.verbose)
         else:
             print(f"Inspect mode only works with .mat files")
 

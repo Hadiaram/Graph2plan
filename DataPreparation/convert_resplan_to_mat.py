@@ -873,16 +873,18 @@ def convert_resplan_to_mat(pkl_path: str, output_path: str):
             ])
 
             structured_item = np.empty(1, dtype=dt)
-            structured_item['name'] = converted['name']
-            structured_item['boundary'] = converted['boundary']
-            structured_item['order'] = converted['order']
-            structured_item['rType'] = converted['rType']
-            structured_item['rBoundary'] = converted['rBoundary']
-            structured_item['gtBox'] = converted['gtBox']
-            structured_item['gtBoxNew'] = converted['gtBoxNew']
-            structured_item['rEdge'] = converted['rEdge']
+
+            structured_item['name'][0] = converted['name']
+            structured_item['boundary'][0] = converted['boundary']
+            structured_item['order'][0] = converted['order']
+            structured_item['rType'][0] = converted['rType']
+            structured_item['rBoundary'][0] = converted['rBoundary']
+            structured_item['gtBox'][0] = converted['gtBox']
+            structured_item['gtBoxNew'][0] = converted['gtBoxNew']
+            structured_item['rEdge'][0] = converted['rEdge']
 
             converted_data.append(structured_item[0])
+
 
             if (i + 1) % 1000 == 0:
                 print(f"  Processed {i + 1}/{len(floorplans)}")
@@ -897,7 +899,7 @@ def convert_resplan_to_mat(pkl_path: str, output_path: str):
 
     # Save as .mat file
     print(f"\nSaving to: {output_path}")
-    converted_array = np.array(converted_data)
+    converted_array = np.array(converted_data, dtype=dt)
     sio.savemat(output_path, {'data': converted_array},
                 format='5', oned_as='row')
 

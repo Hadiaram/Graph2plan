@@ -23,7 +23,7 @@ except ImportError:
     warnings.warn("MATLAB engine not available. Some features may be limited.", UserWarning)
 
 global test_data, test_data_topk, testNameList, trainNameList
-global train_data, trainNameList, trainTF, train_data_eNum, train_data_rNum
+global train_data, trainTF, train_data_eNum, train_data_rNum
 global engview, model
 global tf_train, centroids, clusters
 
@@ -153,6 +153,12 @@ def loadModel():
 def LoadTestBoundary(request):
     start = time.perf_counter()
     testName = request.GET.get('testName').split(".")[0]
+
+    # Handle case where testName doesn't exist in testNameList (e.g., old RPLAN names)
+    if testName not in testNameList:
+        print(f"Warning: Test name '{testName}' not found in testNameList. Using first test floor plan: {testNameList[0]}")
+        testName = testNameList[0]
+
     test_index = testNameList.index(testName)
     data = test_data[test_index]
     data_js = {}
@@ -198,6 +204,12 @@ def NumSearch(request):
     data_new = json.loads(request.GET.get("userInfo"))
     getTestData()
     testName = data_new[0].split(".")[0]
+
+    # Handle case where testName doesn't exist in testNameList (e.g., old RPLAN names)
+    if testName not in testNameList:
+        print(f"Warning: Test name '{testName}' not found in testNameList. Using first test floor plan: {testNameList[0]}")
+        testName = testNameList[0]
+
     test_index = testNameList.index(testName)
     topkList = []
     topkList.clear()

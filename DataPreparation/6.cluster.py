@@ -25,7 +25,12 @@ ncentroids = 1000
 niter = 200
 verbose = True
 
-kmeans = faiss.Kmeans(d, ncentroids, niter=niter, verbose=verbose,gpu=True)
+# Use GPU if available, otherwise CPU
+try:
+    kmeans = faiss.Kmeans(d, ncentroids, niter=niter, verbose=verbose, gpu=True)
+except:
+    print("GPU not available, using CPU")
+    kmeans = faiss.Kmeans(d, ncentroids, niter=niter, verbose=verbose, gpu=False)
 kmeans.train(tf)
 centroids = kmeans.centroids
 

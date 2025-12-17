@@ -718,7 +718,7 @@ def convert_item(item: Any, index: int) -> Dict[str, Any]:
         # 6. EDGES - Compute from graph structure
         node_to_index = {r['node_name']: i for i, r in enumerate(rooms)}
         edges = compute_edges_from_graph(item['graph'], node_to_index, boxes_new)
-        converted['rEdge'] = edges.astype(float)
+        converted['rEdge'] = edges.astype(int)
 
         # 7. ORDER - Order by polygon area (larger rooms first)
         areas = np.array([r['polygon'].area for r in rooms])
@@ -817,7 +817,7 @@ def convert_item(item: Any, index: int) -> Dict[str, Any]:
             r_edge = item['rEdge']
         else:
             r_edge = compute_edge_relations(converted['gtBoxNew'])
-        converted['rEdge'] = np.array(r_edge).astype(float)
+        converted['rEdge'] = np.array(r_edge).astype(int)
 
         # 7. ORDER
         if hasattr(item, 'order'):

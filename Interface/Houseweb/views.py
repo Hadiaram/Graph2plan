@@ -260,7 +260,7 @@ def FindTraindata(trainname):
 
     data_js["hsedge"] = [[int(u), int(v)] for u, v in data.edge[:, [0, 1]]]
 
-    hsbox = [[[float(x1), float(y1), float(x2), float(y2)], [mdul.room_label[cate][1]]] for
+    hsbox = [[[float(x1), float(y1), float(x2), float(y2)], [mdul.room_label[int(cate)][1]]] for
              x1, y1, x2, y2, cate in data.box[:]]
     external = np.asarray(data.boundary)
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
@@ -269,7 +269,7 @@ def FindTraindata(trainname):
     area_ = (ymax - ymin) * (xmax - xmin)
     
     data_js["rmsize"] = [
-        [[20 * math.sqrt((float(x2) - float(x1)) * (float(y2) - float(y1)) / float(area_))], [mdul.room_label[cate][1]]]
+        [[20 * math.sqrt((float(x2) - float(x1)) * (float(y2) - float(y1)) / float(area_))], [mdul.room_label[int(cate)][1]]]
         for
         x1, y1, x2, y2, cate in data.box[:]]
    
@@ -279,7 +279,7 @@ def FindTraindata(trainname):
     for i in range(len(box_order)):
         data_js["hsbox"].append(hsbox[int(float(box_order[i])) - 1])
 
-    data_js["rmpos"] = [[int(cate), str(mdul.room_label[cate][1]), float((x1 + x2) / 2), float((y1 + y2) / 2)] for
+    data_js["rmpos"] = [[int(cate), str(mdul.room_label[int(cate)][1]), float((x1 + x2) / 2), float((y1 + y2) / 2)] for
                         x1, y1, x2, y2, cate in data.box[:]]
     end = time.perf_counter()
     print('find train data time: %s Seconds' % (end - start))
@@ -442,8 +442,24 @@ def AdjustGraph(request):
                     break
     
     fp_end.data = add_dw_fp(fp_end.data)
+
+    # Populate indoor with room boundary polygons (rBoundary)
     data_js["indoor"] = []
-    
+    if hasattr(fp_end.data, 'rBoundary') and fp_end.data.rBoundary:
+        # Use rBoundary from generated floor plan if available
+        for rb in fp_end.data.rBoundary:
+            if isinstance(rb, np.ndarray) and len(rb) > 0:
+                # Convert to list of coordinate strings: "x1,y1 x2,y2 x3,y3 ..."
+                coords_str = " ".join([f"{x},{y}" for x, y in rb])
+                data_js["indoor"].append(coords_str)
+    elif hasattr(data, 'rBoundary') and data.rBoundary:
+        # Fallback to test data rBoundary if generation doesn't have it
+        for rb in data.rBoundary:
+            if isinstance(rb, (np.ndarray, list)) and len(rb) > 0:
+                rb_array = np.array(rb) if not isinstance(rb, np.ndarray) else rb
+                coords_str = " ".join([f"{x},{y}" for x, y in rb_array])
+                data_js["indoor"].append(coords_str)
+
     boundary = data.boundary
     
     isNew = boundary[:, 3]

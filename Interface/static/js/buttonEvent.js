@@ -466,13 +466,17 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
             .text(roombx[i][1][0]);//title标签的文字
 
     }
-    // for (var i = 0; i < indoor.length; i++) {
-    //     d3.select("#LeftLayoutSVG").append("rect").attr("x", indoor[i][0])//每个矩形的起始x坐标
-    //         .attr("y", indoor[i][1])
-    //         .attr("width", indoor[i][2])
-    //         .attr("height", indoor[i][3])//每个矩形的高度
-    //         .attr("fill", roomcolor("Interior door"));//填充颜色
-    // }
+
+    // Render indoor room boundary polygons (rBoundary)
+    // Each element is a coordinate string: "x1,y1 x2,y2 x3,y3 ..."
+    for (var i = 0; i < indoor.length; i++) {
+        d3.select("#LeftLayoutSVG")
+            .append("polygon")
+            .attr("points", indoor[i])
+            .attr("fill", "none")
+            .attr("stroke", interior_color)
+            .attr("stroke-width", 1);
+    }
 
     d3.select("#LeftLayoutSVG")
         .append("polygon")

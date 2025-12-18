@@ -59,40 +59,35 @@ def plot_floorplan(boundary, boxes, room_types, output_path, dpi=100):
     else:
         boundary_coords = np.array(boundary)
 
-    # Plot boundary
+    # Plot boundary (filled with white background)
     boundary_polygon = patches.Polygon(
         boundary_coords,
-        fill=False,
+        fill=True,
+        facecolor='white',
         edgecolor='black',
         linewidth=2
     )
     ax.add_patch(boundary_polygon)
 
-    # Plot rooms
-    for i, (box, rtype) in enumerate(zip(boxes, room_types)):
-        rtype_int = int(rtype)
-
-        # Box format: (y0, x0, y1, x1) -> convert to matplotlib (x0, y0, width, height)
-        if len(box) >= 4:
-            y0, x0, y1, x1 = box[:4]
-        else:
-            continue
-
-        width = x1 - x0
-        height = y1 - y0
-
-        # Get room color
-        color = ROOM_COLORS.get(rtype_int, '#CCCCCC')
-
-        # Create rectangle
-        rect = patches.Rectangle(
-            (x0, y0), width, height,
-            linewidth=1,
-            edgecolor='black',
-            facecolor=color,
-            alpha=0.7
-        )
-        ax.add_patch(rect)
+    # Room rendering disabled - only showing boundary outline
+    # (Uncomment below if you want to render individual rooms)
+    # for i, (box, rtype) in enumerate(zip(boxes, room_types)):
+    #     rtype_int = int(rtype)
+    #     if len(box) >= 4:
+    #         y0, x0, y1, x1 = box[:4]
+    #     else:
+    #         continue
+    #     width = x1 - x0
+    #     height = y1 - y0
+    #     color = ROOM_COLORS.get(rtype_int, '#CCCCCC')
+    #     rect = patches.Rectangle(
+    #         (x0, y0), width, height,
+    #         linewidth=1,
+    #         edgecolor='black',
+    #         facecolor=color,
+    #         alpha=0.7
+    #     )
+    #     ax.add_patch(rect)
 
     # Set axis properties
     ax.set_aspect('equal')
@@ -121,10 +116,41 @@ def generate_images_from_pkl(pkl_path, output_dir, subset_name):
     data_dict = pickle.load(open(pkl_path, 'rb'))
     data = data_dict['data']
 
-    if not isinstance(data, list):
-        data = [data]
+    # Extract name list for proper image naming
+    if subset_name == 'test':
+        name_list = data_dict.get('testNameList', [])
+    else:
+        name_list = data_dict.get('trainNameList', [])
 
-    print(f"Found {len(data)} floor plans")
+    # Convert to list and strip spaces
+    if isinstance(name_list, np.ndarray):
+        name_list = [str(n).strip() for n in name_list]
+    else:
+        name_list = [str(n).strip() for n in name_list]
+
+    # Debug: print data structure
+    print(f"  Data type: {type(data)}")
+    if isinstance(data, np.ndarray):
+        print(f"  Array shape: {data.shape}, dtype: {data.dtype}")
+    print(f"  Name list: {len(name_list)} names (first 5: {name_list[:5]})")
+
+    # Handle scipy.io.loadmat squeeze_me=True squeezing arrays
+    if not isinstance(data, (list, np.ndarray)):
+        # Single item squeezed to scalar - convert to list
+        data = [data]
+    elif isinstance(data, np.ndarray):
+        # NumPy array - convert to list
+        if data.ndim == 0:
+            # 0-dimensional array (squeezed) - extract item and wrap
+            data = [data.item()]
+        elif data.ndim == 1:
+            # 1D array - this is the normal case for struct arrays
+            data = list(data)
+        else:
+            # Multi-dimensional array - flatten to list
+            data = list(data.flat)
+
+    print(f"  Found {len(data)} floor plans")
     print(f"Generating PNG images to: {output_dir}")
 
     # Create output directory
@@ -133,39 +159,43 @@ def generate_images_from_pkl(pkl_path, output_dir, subset_name):
     # Generate images
     for i, item in enumerate(tqdm(data, desc=f"Generating {subset_name} images")):
         try:
-            # Get floor plan name
-            if hasattr(item, 'name'):
-                name = str(item.name)
+            # Handle both dict and object access
+            def get_attr(obj, key):
+                if isinstance(obj, dict):
+                    return obj.get(key)
+                else:
+                    return getattr(obj, key, None)
+
+            # Get floor plan name from name_list
+            if i < len(name_list):
+                name = name_list[i]
             else:
-                name = str(i)
+                name = str(i)  # Fallback to index if name_list is short
 
             # Get floor plan data
-            boundary = item.boundary if hasattr(item, 'boundary') else None
+            boundary = get_attr(item, 'boundary')
 
-            # Get boxes - may be in 'box' attribute or need to construct from gtBox
-            if hasattr(item, 'box'):
-                boxes = item.box[:, :4] if item.box.shape[1] > 4 else item.box
-                room_types = item.box[:, -1] if item.box.shape[1] > 4 else np.zeros(len(item.box))
-            elif hasattr(item, 'gtBox'):
-                boxes = item.gtBox
-                room_types = item.rType if hasattr(item, 'rType') else np.zeros(len(boxes))
-            else:
-                print(f"Warning: No box data for {name}, skipping")
-                continue
-
+            # Check boundary exists
             if boundary is None or len(boundary) == 0:
                 print(f"Warning: No boundary for {name}, skipping")
                 continue
+
+            # For boundary-only rendering, we don't need box data
+            # Use empty arrays since room rendering is disabled
+            boxes = np.array([])
+            room_types = np.array([])
 
             # Generate image
             output_path = output_dir / f"{name}.png"
             plot_floorplan(boundary, boxes, room_types, output_path)
 
         except Exception as e:
-            print(f"Error processing floor plan {i} ({name}): {e}")
+            print(f"Error processing floor plan {i} (name={name if 'name' in locals() else 'unknown'}): {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
-    print(f"✓ Generated {len(list(output_dir.glob('*.png')))} images for {subset_name} set")
+    print(f"SUCCESS: Generated {len(list(output_dir.glob('*.png')))} images for {subset_name} set")
 
 
 def main():
@@ -175,36 +205,32 @@ def main():
     test_pkl = Path('./data/data_test_converted.pkl')
 
     print("=" * 60)
-    print("ResPlan Floor Plan Image Generator")
+    print("ResPlan Floor Plan Image Generator - TEST SET ONLY")
     print("=" * 60)
 
-    # Check if files exist
-    if not train_pkl.exists():
+    # Check if test file exists
+    if not test_pkl.exists():
         # Try Interface location
-        train_pkl = Path('../Interface/static/Data/data_train_converted.pkl')
         test_pkl = Path('../Interface/static/Data/data_test_converted.pkl')
 
-        if not train_pkl.exists():
-            print(f"Error: Could not find data_train_converted.pkl")
+        if not test_pkl.exists():
+            print(f"Error: Could not find data_test_converted.pkl")
             print(f"Tried:")
-            print(f"  - ./data/data_train_converted.pkl")
-            print(f"  - ../Interface/static/Data/data_train_converted.pkl")
+            print(f"  - ./data/data_test_converted.pkl")
+            print(f"  - ../Interface/static/Data/data_test_converted.pkl")
             return
 
-    # Generate images for training set
-    if train_pkl.exists():
-        generate_images_from_pkl(train_pkl, interface_img_dir, 'train')
-    else:
-        print(f"Warning: {train_pkl} not found, skipping train set")
+    # SKIP training set generation - Interface uses test data only
+    print("INFO: Skipping train set (Interface uses test data)")
 
-    # Generate images for test set
+    # Generate images for test set ONLY
     if test_pkl.exists():
         generate_images_from_pkl(test_pkl, interface_img_dir, 'test')
     else:
-        print(f"Warning: {test_pkl} not found, skipping test set")
+        print(f"Error: {test_pkl} not found")
 
     print("\n" + "=" * 60)
-    print("✓ Image generation complete!")
+    print("SUCCESS: Image generation complete!")
     print(f"Images saved to: {interface_img_dir.resolve()}")
     print("=" * 60)
 

@@ -116,8 +116,17 @@ def getTestData():
     global test_data, testNameList, trainNameList
  
     test_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_converted.pkl', 'rb'))
-    test_data, testNameList, trainNameList = test_data['data'], list(test_data['testNameList']), list(
-        test_data['trainNameList'])
+    # Strip trailing spaces from name lists to match image filenames
+    test_data, testNameList, trainNameList = (
+        test_data['data'],
+        [str(n).strip() for n in test_data['testNameList']],
+        [str(n).strip() for n in test_data['trainNameList']]
+    )
+
+    print(f"📊 Loaded {len(test_data)} test floor plans")
+    print(f"📊 testNameList has {len(testNameList)} names: {testNameList[:10]}")
+    print(f"📊 trainNameList has {len(trainNameList)} names: {trainNameList[:10]}")
+
     end = time.perf_counter()
     print('getTestData time: %s Seconds' % (end - start))
 
@@ -153,6 +162,7 @@ def loadModel():
 def LoadTestBoundary(request):
     start = time.perf_counter()
     testName = request.GET.get('testName').split(".")[0]
+    print(f"🔍 LoadTestBoundary called with testName={testName}")
 
     # Handle case where testName doesn't exist in testNameList (e.g., old RPLAN names)
     if testName not in testNameList:
@@ -161,6 +171,9 @@ def LoadTestBoundary(request):
 
     test_index = testNameList.index(testName)
     data = test_data[test_index]
+    # Handle both mat_struct (dict-like) and object attribute access
+    data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
+    print(f"   → Loading test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
     data_js = {}
     data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
         data.boundary[1][0]) + "," + str(data.boundary[1][1])
@@ -397,8 +410,12 @@ def AdjustGraph(request):
     global reledge
     reledge = data_js["hsedge"]
 
+    print(f"🔍 AdjustGraph: Loading boundary for testname={testname}")
     test_index = testNameList.index(testname.split(".")[0])
     data = test_data[test_index]
+    # Handle both mat_struct (dict-like) and object attribute access
+    data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
+    print(f"   → test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
     ex = ""
     for i in range(len(data.boundary)):
         ex = ex + str(data.boundary[i][0]) + "," + str(data.boundary[i][1]) + " "
@@ -444,12 +461,12 @@ def AdjustGraph(request):
     fp_end.data = add_dw_fp(fp_end.data)
 
     # Populate indoor with room boundary polygons (rBoundary)
+    # This makes the Layout view match the thumbnail images
     data_js["indoor"] = []
     if hasattr(fp_end.data, 'rBoundary') and fp_end.data.rBoundary:
         # Use rBoundary from generated floor plan if available
         for rb in fp_end.data.rBoundary:
             if isinstance(rb, np.ndarray) and len(rb) > 0:
-                # Convert to list of coordinate strings: "x1,y1 x2,y2 x3,y3 ..."
                 coords_str = " ".join([f"{x},{y}" for x, y in rb])
                 data_js["indoor"].append(coords_str)
     elif hasattr(data, 'rBoundary') and data.rBoundary:

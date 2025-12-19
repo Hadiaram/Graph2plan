@@ -101,7 +101,7 @@ def extract_coords_from_shapely(geometry) -> np.ndarray:
         coords: (N x 2) array of (x, y) coordinates
     """
     try:
-        from shapely.geometry import Polygon, MultiPolygon, LineString
+        from shapely.geometry import Polygon, MultiPolygon, LineString #type: ignore
     except ImportError:
         raise ImportError("Shapely library required. Install with: pip install shapely")
 
@@ -132,7 +132,7 @@ def compute_boundary_from_rooms(room_geometries: List) -> np.ndarray:
         boundary: (N x 2) array of boundary coordinates
     """
     try:
-        from shapely.ops import unary_union
+        from shapely.ops import unary_union #type: ignore
     except ImportError:
         raise ImportError("Shapely library required. Install with: pip install shapely")
 
@@ -479,11 +479,11 @@ def build_room_list_from_graph(item: Dict) -> List[Dict]:
         List of room dicts with: prefix, index, polygon, rType, rBoundary, box
     """
     try:
-        import networkx as nx
+        import networkx as nx #type: ignore
     except ImportError:
         raise ImportError("NetworkX library required. Install with: pip install networkx")
 
-    from shapely.geometry import MultiPolygon
+    from shapely.geometry import MultiPolygon #type: ignore
 
     graph = item['graph']
     rooms = []
@@ -619,7 +619,7 @@ def extract_boundary_from_inner(item: Dict) -> np.ndarray:
     Returns:
         boundary: (N x 4) array of (x, y, direction, isNew)
     """
-    from shapely.geometry import MultiPolygon, Point
+    from shapely.geometry import MultiPolygon, Point #type: ignore
 
     # Get largest polygon from 'inner' MultiPolygon
     inner = item['inner']

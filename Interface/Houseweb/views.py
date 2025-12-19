@@ -1,5 +1,5 @@
-from django.shortcuts import render
-from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render # type: ignore
+from django.http import HttpResponse, JsonResponse # type: ignore
 import json
 import model.test as mltest
 import model.utils as mdul
@@ -11,13 +11,13 @@ import scipy.io as sio
 import numpy as np
 from model.decorate import *
 import math
-import pandas as pd
+import pandas as pd # type: ignore
 import warnings
 
 # Try to import MATLAB - make it optional
 HAS_MATLAB = False
 try:
-    import matlab.engine
+    import matlab.engine #type: ignore
     HAS_MATLAB = True
 except ImportError:
     warnings.warn("MATLAB engine not available. Some features may be limited.", UserWarning)

@@ -31,10 +31,42 @@ global tf_train, centroids, clusters
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
     """
     Python fallback for MATLAB align_fp when MATLAB is not available.
-    Returns boxes without complex alignment.
+    Clips boxes to fit within boundary and returns aligned boxes.
     """
     boxes = np.array(boxes)
     types = np.array(types)
+    boundary = np.array(boundary)
+
+    # Get boundary extents
+    x_min = np.min(boundary[:, 0])
+    x_max = np.max(boundary[:, 0])
+    y_min = np.min(boundary[:, 1])
+    y_max = np.max(boundary[:, 1])
+
+    # Clip boxes to be within boundary with small margin
+    margin = 5  # pixels margin from boundary
+    clipped_boxes = []
+    for box in boxes:
+        if len(box) >= 4:
+            x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+
+            # Clip to boundary limits
+            x1 = max(x_min + margin, min(x1, x_max - margin))
+            x2 = max(x_min + margin, min(x2, x_max - margin))
+            y1 = max(y_min + margin, min(y1, y_max - margin))
+            y2 = max(y_min + margin, min(y2, y_max - margin))
+
+            # Ensure x2 > x1 and y2 > y1
+            if x2 <= x1:
+                x2 = x1 + 10
+            if y2 <= y1:
+                y2 = y1 + 10
+
+            clipped_boxes.append([x1, y1, x2, y2])
+        else:
+            clipped_boxes.append(box)
+
+    boxes = np.array(clipped_boxes)
 
     # Simple ordering: sort by y-coordinate (top to bottom), then x-coordinate (left to right)
     if len(boxes) > 0:
@@ -273,12 +305,26 @@ def FindTraindata(trainname):
 
     data_js["hsedge"] = [[int(u), int(v)] for u, v in data.edge[:, [0, 1]]]
 
-    hsbox = [[[float(x1), float(y1), float(x2), float(y2)], [mdul.room_label[int(cate)][1]]] for
-             x1, y1, x2, y2, cate in data.box[:]]
     external = np.asarray(data.boundary)
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
-    
+
+    # Clip boxes to boundary
+    margin = 5
+    hsbox = []
+    for x1, y1, x2, y2, cate in data.box[:]:
+        # Clip to boundary limits
+        x1_clipped = max(xmin + margin, min(float(x1), xmax - margin))
+        x2_clipped = max(xmin + margin, min(float(x2), xmax - margin))
+        y1_clipped = max(ymin + margin, min(float(y1), ymax - margin))
+        y2_clipped = max(ymin + margin, min(float(y2), ymax - margin))
+        # Ensure x2 > x1 and y2 > y1
+        if x2_clipped <= x1_clipped:
+            x2_clipped = x1_clipped + 10
+        if y2_clipped <= y1_clipped:
+            y2_clipped = y1_clipped + 10
+        hsbox.append([[x1_clipped, y1_clipped, x2_clipped, y2_clipped], [mdul.room_label[int(cate)][1]]])
+
     area_ = (ymax - ymin) * (xmax - xmin)
     
     data_js["rmsize"] = [
@@ -398,34 +444,55 @@ def AdjustGraph(request):
         for j in range(4):
             tmp.append(float(boxes_pred[int(float(box_order[i][0])) - 1][j]))
         boxes_end.append(tmp)
-    
-    data_js['roomret'] = []
-    for k in range(len(room)):
-        data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
-        data_js['roomret'].append(data)
-    
-    # change the box size
-    global relbox
-    relbox = data_js['roomret']
-    global reledge
-    reledge = data_js["hsedge"]
 
+    # Get boundary for clipping
     print(f"🔍 AdjustGraph: Loading boundary for testname={testname}")
     test_index = testNameList.index(testname.split(".")[0])
     data = test_data[test_index]
     # Handle both mat_struct (dict-like) and object attribute access
     data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
     print(f"   → test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
+
+    external = np.asarray(data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+
+    # Clip boxes to boundary
+    margin = 5
+    clipped_boxes_end = []
+    for box in boxes_end:
+        x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+        # Clip to boundary limits
+        x1 = max(xmin + margin, min(x1, xmax - margin))
+        x2 = max(xmin + margin, min(x2, xmax - margin))
+        y1 = max(ymin + margin, min(y1, ymax - margin))
+        y2 = max(ymin + margin, min(y2, ymax - margin))
+        # Ensure x2 > x1 and y2 > y1
+        if x2 <= x1:
+            x2 = x1 + 10
+        if y2 <= y1:
+            y2 = y1 + 10
+        clipped_boxes_end.append([x1, y1, x2, y2])
+
+    boxes_end = clipped_boxes_end
+
+    data_js['roomret'] = []
+    for k in range(len(room)):
+        data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
+        data_js['roomret'].append(data)
+
+    # change the box size
+    global relbox
+    relbox = data_js['roomret']
+    global reledge
+    reledge = data_js["hsedge"]
+
     ex = ""
     for i in range(len(data.boundary)):
         ex = ex + str(data.boundary[i][0]) + "," + str(data.boundary[i][1]) + " "
     data_js['exterior'] = ex
     data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
         data.boundary[1][0]) + "," + str(data.boundary[1][1])
-
-    external = np.asarray(data.boundary)
-    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
-    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
     area_ = (ymax - ymin) * (xmax - xmin)
     data_js['rmsize'] = []
     for i in range(len(data_js['roomret'])):

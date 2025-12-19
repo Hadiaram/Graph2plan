@@ -113,7 +113,7 @@ def retrieval(test_data,k,multi_clusters):
     return index
 
 def vis_boundary(b):
-    import cv2
+    import cv2 # type: ignore
     import matplotlib.pyplot as plt
     img = np.ones((256,256,3))
     img = cv2.line(img,tuple(b[0,:2]),tuple(b[1,:2]),(1.,1.,0.),thickness=2)
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     import scipy.io as sio
     import pickle
     from time import time
-    import cv2
+    import cv2 # type: ignore
     import matplotlib.pyplot as plt
 
     def vis_boundary(b):

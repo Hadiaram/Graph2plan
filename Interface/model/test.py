@@ -14,7 +14,7 @@ import warnings
 # Try to import MATLAB - make it optional
 HAS_MATLAB = False
 try:
-    import matlab.engine
+    import matlab.engine #type: ignore
     HAS_MATLAB = True
 except ImportError:
     warnings.warn("MATLAB engine not available in test.py. Using Python fallback.", UserWarning)
@@ -67,7 +67,7 @@ def load_model():
     return model
 
 def get_userinfo(userRoomID,adptRoomID):
-    start = time.clock()
+    start = time.perf_counter()
     global model
     test_index = vw.testNameList.index(userRoomID.split(".")[0])
     test_data = vw.test_data[test_index]
@@ -199,10 +199,10 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     rEdge = fp_end.get_triples(tensor=False)[:, [0, 2, 1]]
     Edge = [[float(u), float(v), float(type2)] for u, v, type2 in rEdge]
 
-    s=time.clock()
+    s=time.perf_counter()
     boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end)
 
-    e=time.clock()
+    e=time.perf_counter()
     print(' model test time: %s Seconds' % (e - s))
 
     boxes_pred = boxes_pred * 255
@@ -216,7 +216,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     fp_end.data.refineBox=np.array(Box)
     fp_end.data.rEdge=np.array(Edge)
 
-    startcom = time.clock()
+    startcom = time.perf_counter()
     if vw.engview is not None and HAS_MATLAB:
         # Use MATLAB alignment
         boundary_mat = matlab.double(boundary)
@@ -237,7 +237,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
         print("Using Python fallback for alignment")
         box_out, box_order, rBoundary = vw._python_fallback_align(boundary, Box, rNode.tolist(), Edge, 18)
 
-    endcom = time.clock()
+    endcom = time.perf_counter()
     print(' alignment compute time: %s Seconds' % (endcom - startcom))
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)

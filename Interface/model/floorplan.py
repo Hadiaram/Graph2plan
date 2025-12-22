@@ -1,7 +1,7 @@
-import torch
+import torch #type: ignore
 import scipy.io as sio
 import numpy as np
-import cv2
+import cv2 #type: ignore
 import copy
 from model.utils import *
 

@@ -426,8 +426,8 @@ function LoadTestBoundary(files) {
             .attr("stroke-width", border);
 
     })
-    d3.select('body').select('#LeftBaseSVG').attr("transform", "scale(1)");
-    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1)");
+    d3.select('body').select('#LeftBaseSVG').attr("transform", "scale(1.5)");
+    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
 
     NumSearch();
 }
@@ -439,43 +439,47 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
     var interior_color = roomcolor("Interior wall");
     var border = 4;
     console.log("CreateLeftPlan", roombx);
+    
+    // Create clipPath first
+    d3.select("#LeftLayoutSVG").append("clipPath")
+        .attr("id", "clip-th")
+        .append("polygon")
+        .attr("points", hsex);
+    
     for (var i = 0; i < roombx.length; i++) {
         var rx = roombx[i][0][0];
         var ry = roombx[i][0][1];
         var rw = roombx[i][0][2] - roombx[i][0][0];
         var rh = roombx[i][0][3] - roombx[i][0][1];
         var color = roomcolor(roombx[i][1][0]);
+        var roomType = roombx[i][1][0];
         var tooltip = d3.select("body").append("div")
             .attr("class", "tooltip") //用于css设置类样式
-            .attr("opacity", 0.0).attr("id", "tooltip" + roombx[i][1][0])
-            .text(roombx[i][1][0]);
-        d3.select("#LeftLayoutSVG").append("rect").attr("x", rx)//每个矩形的起始x坐标
+            .attr("opacity", 0.0).attr("id", "tooltip" + roomType)
+            .text(roomType);
+        
+        var rect = d3.select("#LeftLayoutSVG").append("rect").attr("x", rx)//每个矩形的起始x坐标
             .attr("y", ry)
             .attr("width", rw)
             .attr("height", rh)//每个矩形的高度
             .attr("stroke-width", border)//加边框厚度
             .attr("stroke", interior_color)
             .attr("fill", color)//填充颜色
-            .attr("id", roombx[i][1][0] + "_" + roombx[i][2])
+            .attr("id", roomType + "_" + roombx[i][2])
             .on("mousedown", rect_mousedown)
             .on("mousemove", rect_mousemove)
             .on("mouseup", rect_mouseup)
             .on("click", rect_click)
-            .on("dblclick", rect_dblclick)
-            .append("title")//此处加入title标签
-            .text(roombx[i][1][0]);//title标签的文字
+            .on("dblclick", rect_dblclick);
+        
+        // Only apply clipping to non-balcony rooms
+        if (roomType !== "Balcony") {
+            rect.attr("clip-path", "url(#clip-th)");
+        }
+        
+        rect.append("title")//此处加入title标签
+            .text(roomType);//title标签的文字
 
-    }
-
-    // Render indoor room boundary polygons (rBoundary)
-    // Each element is a coordinate string: "x1,y1 x2,y2 x3,y3 ..."
-    for (var i = 0; i < indoor.length; i++) {
-        d3.select("#LeftLayoutSVG")
-            .append("polygon")
-            .attr("points", indoor[i])
-            .attr("fill", "none")
-            .attr("stroke", interior_color)
-            .attr("stroke-width", 1);
     }
 
     d3.select("#LeftLayoutSVG")
@@ -509,10 +513,6 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
 //boudary clip
     //??
     // d3.select("body").select("#LeftCanvas").attr("style", "display:none");
-    d3.select("#LeftLayoutSVG").append("clipPath")
-        .attr("id", "clip-th")
-        .append("polygon")
-        .attr("points", hsex);
     // for (var i = 0; i < windows.length; i++) {
     //
     //     d3.select("#LeftLayoutSVG").append("rect").attr("x", windows[i][0])//每个矩形的起始x坐标
@@ -532,8 +532,7 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
     //          .attr("stroke-width", 1) .attr("class", "windowsline");
     // }
 
-    d3.select('body').select('#LeftLayoutSVG').attr("transform", "scale(1)");
-    d3.select("#LeftLayoutSVG").attr("clip-path", "url(#clip-th)");
+    d3.select('body').select('#LeftLayoutSVG').attr("transform", "scale(1.5)");
 
 }
 
@@ -569,12 +568,20 @@ function CreateRightImage(roomID) {
                 .attr("stroke-width", 2)
                 .attr("id", (i + 1) + "-" + ret['rmpos'][i][1])
         }
-        d3.select('body').select('#RightSVG').attr("transform", "scale(1)");
+        d3.select('body').select('#RightSVG').attr("transform", "scale(1.5)");
 
         var border = 4;
         //Layout room
         var roombx = ret["hsbox"];
         var interiorwall_color = roomcolor("Interior wall");
+
+        // Create clipPath first
+        var hsex = ret["exterior"];
+        d3.select("#RightLayoutSVG").append("clipPath")
+            .attr("id", "Rightclip-th")
+            .append("polygon")
+            .attr("points", hsex);
+
         for (var i = 0; i < roombx.length; i++) {
 
             var rx = roombx[i][0][0];
@@ -582,8 +589,10 @@ function CreateRightImage(roomID) {
             var rw = roombx[i][0][2] - roombx[i][0][0];
             var rh = roombx[i][0][3] - roombx[i][0][1];
             var color = roomcolor(roombx[i][1][0]);
+            var roomType = roombx[i][1][0];
 
-            d3.select("#RightLayoutSVG")
+            // Apply clip-path to all rooms EXCEPT balconies
+            var rect = d3.select("#RightLayoutSVG")
                 .append("rect")
                 .attr("x", rx)//每个矩形的起始x坐标
                 .attr("y", ry)
@@ -592,17 +601,13 @@ function CreateRightImage(roomID) {
                 .attr("stroke-width", 3)//加边框厚度
                 .attr("stroke", interiorwall_color)
                 .attr("fill", color)//填充颜色
-                .attr("id", roombx[i][1][0]);
+                .attr("id", roomType);
+            
+            // Only apply clipping to non-balcony rooms
+            if (roomType !== "Balcony") {
+                rect.attr("clip-path", "url(#Rightclip-th)");
+            }
         }
-
-        var hsex = ret["exterior"];
-
-        //clip over boundary
-        d3.select("#RightLayoutSVG").append("clipPath")
-            .attr("id", "Rightclip-th")
-            .append("polygon")
-            .attr("points", hsex);
-        d3.select("#RightLayoutSVG").attr("clip-path", "url(#Rightclip-th)");
         //Layout Boundary
         d3.select("#RightLayoutSVG")
             .append("polygon")
@@ -622,7 +627,7 @@ function CreateRightImage(roomID) {
             .attr("stroke", fontdoor_color)
             .attr("stroke-width", 6);
     });
-    d3.select('body').select('#RightLayoutSVG').attr("transform", "scale(1)");
+    d3.select('body').select('#RightLayoutSVG').attr("transform", "scale(1.5)");
 
 }
 
@@ -815,7 +820,7 @@ function CreateLeftGraph(rooms, roomID) {
         });
 
     });
-    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1)");
+    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
 
 }
 

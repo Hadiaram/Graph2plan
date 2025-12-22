@@ -43,26 +43,30 @@ def _python_fallback_align(boundary, boxes, types, edges, threshold):
     y_min = np.min(boundary[:, 1])
     y_max = np.max(boundary[:, 1])
 
-    # Clip boxes to be within boundary with small margin
+    # Clip boxes to be within boundary with small margin (except balconies which should extend outside)
     margin = 5  # pixels margin from boundary
     clipped_boxes = []
-    for box in boxes:
+    for i, box in enumerate(boxes):
         if len(box) >= 4:
             x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
 
-            # Clip to boundary limits
-            x1 = max(x_min + margin, min(x1, x_max - margin))
-            x2 = max(x_min + margin, min(x2, x_max - margin))
-            y1 = max(y_min + margin, min(y1, y_max - margin))
-            y2 = max(y_min + margin, min(y2, y_max - margin))
+            # Balconies (type 9) should extend outside - don't clip them
+            if i < len(types) and int(types[i]) == 9:
+                clipped_boxes.append([x1, y1, x2, y2])
+            else:
+                # Clip to boundary limits
+                x1 = max(x_min + margin, min(x1, x_max - margin))
+                x2 = max(x_min + margin, min(x2, x_max - margin))
+                y1 = max(y_min + margin, min(y1, y_max - margin))
+                y2 = max(y_min + margin, min(y2, y_max - margin))
 
-            # Ensure x2 > x1 and y2 > y1
-            if x2 <= x1:
-                x2 = x1 + 10
-            if y2 <= y1:
-                y2 = y1 + 10
+                # Ensure x2 > x1 and y2 > y1
+                if x2 <= x1:
+                    x2 = x1 + 10
+                if y2 <= y1:
+                    y2 = y1 + 10
 
-            clipped_boxes.append([x1, y1, x2, y2])
+                clipped_boxes.append([x1, y1, x2, y2])
         else:
             clipped_boxes.append(box)
 
@@ -309,21 +313,25 @@ def FindTraindata(trainname):
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
 
-    # Clip boxes to boundary
+    # Clip boxes to boundary (except balconies which should extend outside)
     margin = 5
     hsbox = []
     for x1, y1, x2, y2, cate in data.box[:]:
-        # Clip to boundary limits
-        x1_clipped = max(xmin + margin, min(float(x1), xmax - margin))
-        x2_clipped = max(xmin + margin, min(float(x2), xmax - margin))
-        y1_clipped = max(ymin + margin, min(float(y1), ymax - margin))
-        y2_clipped = max(ymin + margin, min(float(y2), ymax - margin))
-        # Ensure x2 > x1 and y2 > y1
-        if x2_clipped <= x1_clipped:
-            x2_clipped = x1_clipped + 10
-        if y2_clipped <= y1_clipped:
-            y2_clipped = y1_clipped + 10
-        hsbox.append([[x1_clipped, y1_clipped, x2_clipped, y2_clipped], [mdul.room_label[int(cate)][1]]])
+        # Balconies (type 9) should extend outside - don't clip them
+        if int(cate) == 9:
+            hsbox.append([[float(x1), float(y1), float(x2), float(y2)], [mdul.room_label[int(cate)][1]]])
+        else:
+            # Clip to boundary limits
+            x1_clipped = max(xmin + margin, min(float(x1), xmax - margin))
+            x2_clipped = max(xmin + margin, min(float(x2), xmax - margin))
+            y1_clipped = max(ymin + margin, min(float(y1), ymax - margin))
+            y2_clipped = max(ymin + margin, min(float(y2), ymax - margin))
+            # Ensure x2 > x1 and y2 > y1
+            if x2_clipped <= x1_clipped:
+                x2_clipped = x1_clipped + 10
+            if y2_clipped <= y1_clipped:
+                y2_clipped = y1_clipped + 10
+            hsbox.append([[x1_clipped, y1_clipped, x2_clipped, y2_clipped], [mdul.room_label[int(cate)][1]]])
 
     area_ = (ymax - ymin) * (xmax - xmin)
     
@@ -334,9 +342,23 @@ def FindTraindata(trainname):
    
 
     box_order = data.order
-    data_js["hsbox"] = []
+    
+    # Reorder boxes by size (largest first, smallest last)
+    # This ensures smaller rooms are drawn on top when overlapping
+    box_sizes = []
     for i in range(len(box_order)):
-        data_js["hsbox"].append(hsbox[int(float(box_order[i])) - 1])
+        box_idx = int(float(box_order[i])) - 1
+        box = hsbox[box_idx]
+        x1, y1, x2, y2 = box[0][0], box[0][1], box[0][2], box[0][3]
+        area = (x2 - x1) * (y2 - y1)
+        box_sizes.append((area, i, box))
+    
+    # Sort by area (descending - largest first)
+    box_sizes.sort(key=lambda x: x[0], reverse=True)
+    
+    data_js["hsbox"] = []
+    for area, original_idx, box in box_sizes:
+        data_js["hsbox"].append(box)
 
     data_js["rmpos"] = [[int(cate), str(mdul.room_label[int(cate)][1]), float((x1 + x2) / 2), float((y1 + y2) / 2)] for
                         x1, y1, x2, y2, cate in data.box[:]]
@@ -457,22 +479,26 @@ def AdjustGraph(request):
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
 
-    # Clip boxes to boundary
+    # Clip boxes to boundary (except balconies which should extend outside)
     margin = 5
     clipped_boxes_end = []
-    for box in boxes_end:
+    for i, box in enumerate(boxes_end):
         x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
-        # Clip to boundary limits
-        x1 = max(xmin + margin, min(x1, xmax - margin))
-        x2 = max(xmin + margin, min(x2, xmax - margin))
-        y1 = max(ymin + margin, min(y1, ymax - margin))
-        y2 = max(ymin + margin, min(y2, ymax - margin))
-        # Ensure x2 > x1 and y2 > y1
-        if x2 <= x1:
-            x2 = x1 + 10
-        if y2 <= y1:
-            y2 = y1 + 10
-        clipped_boxes_end.append([x1, y1, x2, y2])
+        # Balconies (type 9) should extend outside - don't clip them
+        if int(room[i]) == 9:
+            clipped_boxes_end.append([x1, y1, x2, y2])
+        else:
+            # Clip to boundary limits
+            x1 = max(xmin + margin, min(x1, xmax - margin))
+            x2 = max(xmin + margin, min(x2, xmax - margin))
+            y1 = max(ymin + margin, min(y1, ymax - margin))
+            y2 = max(ymin + margin, min(y2, ymax - margin))
+            # Ensure x2 > x1 and y2 > y1
+            if x2 <= x1:
+                x2 = x1 + 10
+            if y2 <= y1:
+                y2 = y1 + 10
+            clipped_boxes_end.append([x1, y1, x2, y2])
 
     boxes_end = clipped_boxes_end
 

@@ -154,6 +154,7 @@ def generate_images_from_pkl(pkl_path, output_dir, subset_name):
     print(f"Generating PNG images to: {output_dir}")
 
     # Create output directory
+    output_dir = Path(output_dir)  # Convert string to Path object
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate images
@@ -201,7 +202,7 @@ def generate_images_from_pkl(pkl_path, output_dir, subset_name):
 def main():
     # Paths
     interface_img_dir = Path('../Interface/static/Data/Img')
-    train_pkl = Path('./data/data_train_converted.pkl')
+    train_pkl = Path(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_converted.pkl')
     test_pkl = Path('./data/data_test_converted.pkl')
 
     print("=" * 60)
@@ -228,6 +229,12 @@ def main():
         generate_images_from_pkl(test_pkl, interface_img_dir, 'test')
     else:
         print(f"Error: {test_pkl} not found")
+
+    if train_pkl.exists():
+        generate_images_from_pkl(train_pkl, r"C:\Users\hmbashir\Documents\Prompt_to_Graph\Debugging\Image Comparison\Processed", 'train')
+    else:
+        print(f"Error: {train_pkl} not found")
+
 
     print("\n" + "=" * 60)
     print("SUCCESS: Image generation complete!")

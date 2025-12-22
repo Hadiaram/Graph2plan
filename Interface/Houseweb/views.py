@@ -26,6 +26,11 @@ global test_data, test_data_topk, testNameList, trainNameList
 global train_data, trainTF, train_data_eNum, train_data_rNum
 global engview, model
 global tf_train, centroids, clusters
+global boxes_pred, indxlist
+
+# Initialize module-level variables
+boxes_pred = None
+indxlist = None
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -391,7 +396,7 @@ def TransGraph(request):
 
     data_js = {}
     # fp_end  hsedge
-    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(np.float).tolist()
+    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()
 
     # fp_rmsize
     external = np.asarray(fp_end.data.boundary)
@@ -399,7 +404,7 @@ def TransGraph(request):
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
     area_ = (ymax - ymin) * (xmax - xmin)
     data_js["rmsize"] = [
-        [[20 * math.sqrt((float(x2) - float(x1)) * (float(y2) - float(y1)) / float(area_))], [mdul.room_label[cate][1]]]
+        [[20 * math.sqrt((float(x2) - float(x1)) * (float(y2) - float(y1)) / float(area_))], [mdul.room_label[int(cate)][1]]]
         for
         x1, y1, x2, y2, cate in fp_end.data.box[:]]
     # fp_end rmpos
@@ -445,7 +450,7 @@ def AdjustGraph(request):
     boxes_pred = mlresult[1]
     
     data_js = {}
-    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(np.float).tolist()
+    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()
   
     rooms = fp_end.get_rooms(tensor=False)
     center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in fp_end.data.box[:, :4]]
@@ -690,12 +695,12 @@ def Save_Editbox(request):
                 tmp=int(newindx), (newx - oldx), ( newy- oldy),float(scalesize)
                 temp.append(tmp)
     newbox=[]
-    if mltest.adjust==True:
+    if mltest.adjust==True and boxes_pred is not None:
         oldbox = []
         for i in range(len(boxes_pred)):
             indxtmp=[boxes_pred[i][0],boxes_pred[i][1],boxes_pred[i][2],boxes_pred[i][3],boxes_pred[i][0]]
             oldbox.append(indxtmp)
-    if mltest.adjust==False:
+    else:
         indxlist=[]
         oldbox=fp_end.data.box.tolist()
         for i in range(len(oldbox)):
@@ -812,7 +817,7 @@ def TransGraph_net(request):
 
     data_js = {}
     # fp_end  hsedge
-    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(np.float).tolist()
+    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()
 
     # fp_end rmpos
     rooms = fp_end.get_rooms(tensor=False)

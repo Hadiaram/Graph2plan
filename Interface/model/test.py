@@ -115,12 +115,12 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
                 temp.append(tmp)
     newbox=[]
     print(adjust)
-    if adjust==True:
+    if adjust==True and vw.boxes_pred is not None:
         oldbox = []
         for i in range(len(vw.boxes_pred)):
             indxtmp=[vw.boxes_pred[i][0],vw.boxes_pred[i][1],vw.boxes_pred[i][2],vw.boxes_pred[i][3],vw.boxes_pred[i][0]]
             oldbox.append(indxtmp)
-    if adjust==False:
+    else:
         indxlist=[]
         oldbox=fp_end.data.box.tolist()
         for i in range(len(oldbox)):
@@ -200,6 +200,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     Edge = [[float(u), float(v), float(type2)] for u, v, type2 in rEdge]
 
     s=time.perf_counter()
+    vw.loadModel()
     boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end)
 
     e=time.perf_counter()

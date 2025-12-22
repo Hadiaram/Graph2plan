@@ -161,15 +161,33 @@ class FloorPlan():
         external = self.data.boundary[:, :2]
         bx0, bx1 = np.min(external[:, 0]), np.max(external[:, 0])
         by0, by1 = np.min(external[:, 1]), np.max(external[:, 1])
+
+        # integer indices for slicing
+        bx0i = int(np.floor(bx0))
+        bx1i = int(np.ceil(bx1))
+        by0i = int(np.floor(by0))
+        by1i = int(np.ceil(by1))
+
+        # clip to mask bounds (mask is 256x256)
+        bx0i = max(0, min(bx0i, 255))
+        bx1i = max(0, min(bx1i, 255))
+        by0i = max(0, min(by0i, 255))
+        by1i = max(0, min(by1i, 255))
+
+        # avoid empty crop if something weird happens
+        if bx1i < bx0i or by1i < by0i:
+            return  # or handle gracefully
+
         hw_b = np.array([by1 - by0, bx1 - bx0])
         step = hw_b / 10
 
         pts = np.concatenate([external, external[:1]])
         mask = np.zeros((256, 256), dtype=np.uint8)
-        cv2.fillPoly(mask, pts.reshape(1, -1, 2), 255)
+        cv2.fillPoly(mask, [np.round(pts).astype(np.int32).reshape(1, -1, 2)], 255)
         # plt.imshow(mask)
         # plt.show()
-        mask = cv2.resize(mask[by0:by1 + 1, bx0:bx1 + 1], (10, 10))
+        crop = mask[by0i:by1i + 1, bx0i:bx1i + 1]
+        mask = cv2.resize(crop, (10, 10))
         # plt.imshow(mask)
         # plt.show()
         mask[mask > 0] = 255
@@ -179,6 +197,8 @@ class FloorPlan():
             box = self.data.box[i][:4][[1, 0, 3, 2]]
             center = (box[:2] + box[2:]) / 2
             center55 = ((center - np.array([by0, bx0])) * 10 / hw_b).astype(int)
+            # clip to valid mask indices (0-9 for 10x10 mask)
+            center55 = np.clip(center55, 0, 9)
 
             if not mask[center55[0], center55[1]]:
                 outside_rooms.append([i, center55])

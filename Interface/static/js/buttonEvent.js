@@ -272,7 +272,9 @@ function NumSearch() {
         rooms.push(room);
     });
     $.get("/index/NumSearch/", {'userInfo': JSON.stringify(rooms)}, function (ret) {
-        ListBox(ret, rooms);
+        // Handle new response format with backward compatibility
+        var floorPlans = ret.floorPlans || ret;  // Use floorPlans if available, otherwise fall back to old format
+        ListBox(floorPlans, rooms);
     });
 }
 
@@ -716,7 +718,9 @@ function GraphSearch() {
         'userRoomID': hsname,
         'Numrooms': JSON.stringify(Numrooms),
     }, function (ret) {
-        ListBox(ret, rooms)
+        // Handle new response format with backward compatibility
+        var floorPlans = ret.floorPlans || ret;  // Use floorPlans if available, otherwise fall back to old format
+        ListBox(floorPlans, rooms)
     });
 }
 

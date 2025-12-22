@@ -253,6 +253,159 @@ def filter_graph(graph_):
     return filter_graphfunc
 
 
+def compute_similarity_scores(candidate_rNum, candidate_eNum, requested_rNum, requested_edge,
+                               tf_distances, mask=None, alpha=0.35, beta=0.35, gamma=0.30):
+    """
+    Compute similarity scores combining room count, edge structure, and boundary similarity.
+    Lower scores indicate better matches.
+
+    Args:
+        candidate_rNum: Array of room counts for candidates (N x num_room_types)
+        candidate_eNum: Array of edge structures for candidates (N x edge_dim) or None
+        requested_rNum: Requested room counts (num_room_types,)
+        requested_edge: Requested edge structure or None
+        tf_distances: Turn function distances for boundary similarity (N,)
+        mask: Boolean mask indicating which room types to consider (num_room_types,)
+        alpha: Weight for room count similarity (default 0.35)
+        beta: Weight for edge structure similarity (default 0.35, ignored if no edge data)
+        gamma: Weight for boundary similarity (default 0.30)
+
+    Returns:
+        scores: Array of similarity scores (N,) - lower is better
+    """
+    # Normalize weights if edge data is missing
+    if candidate_eNum is None or requested_edge is None:
+        alpha_norm = alpha / (alpha + gamma)
+        gamma_norm = gamma / (alpha + gamma)
+        beta_norm = 0.0
+    else:
+        alpha_norm = alpha
+        beta_norm = beta
+        gamma_norm = gamma
+
+    # Apply mask if provided
+    if mask is not None:
+        mask_array = np.array(mask).astype(bool)
+        candidate_counts = candidate_rNum[:, mask_array]
+        requested_counts = np.array(requested_rNum)[mask_array]
+    else:
+        candidate_counts = candidate_rNum
+        requested_counts = np.array(requested_rNum)
+
+    # Room count similarity (L1 distance)
+    room_distances = np.sum(np.abs(candidate_counts - requested_counts), axis=1)
+
+    # Edge structure similarity (L1 distance) if available
+    if candidate_eNum is not None and requested_edge is not None:
+        edge_distances = np.sum(np.abs(candidate_eNum - requested_edge), axis=1)
+    else:
+        edge_distances = np.zeros_like(room_distances)
+
+    # Normalize distances to [0, 1] range
+    max_room_dist = np.max(room_distances) if np.max(room_distances) > 0 else 1.0
+    max_edge_dist = np.max(edge_distances) if np.max(edge_distances) > 0 else 1.0
+    max_tf_dist = np.max(tf_distances) if np.max(tf_distances) > 0 else 1.0
+
+    room_distances_norm = room_distances / max_room_dist
+    edge_distances_norm = edge_distances / max_edge_dist
+    tf_distances_norm = tf_distances / max_tf_dist
+
+    # Weighted combination
+    scores = (alpha_norm * room_distances_norm +
+              beta_norm * edge_distances_norm +
+              gamma_norm * tf_distances_norm)
+
+    return scores
+
+
+def calculate_room_match_percentage(candidate_rNum, requested_rNum, mask=None, exact_match=None):
+    """
+    Calculate percentage match based on how many requested rooms are present.
+
+    Args:
+        candidate_rNum: Room counts for a candidate (num_room_types,)
+        requested_rNum: Requested room counts (num_room_types,)
+        mask: Boolean mask indicating which room types to consider
+        exact_match: Boolean array indicating which room types require exact match (not just >=)
+
+    Returns:
+        percentage: Match percentage (0-100)
+    """
+    candidate_counts = np.array(candidate_rNum)
+    requested_counts = np.array(requested_rNum)
+
+    # Apply mask to filter which room types to consider
+    if mask is not None:
+        mask_array = np.array(mask).astype(bool)
+        # Only consider room types where mask is True AND requested count > 0
+        active_mask = mask_array & (requested_counts > 0)
+
+        if not np.any(active_mask):
+            # No room requirements specified
+            print("WARNING: No room requirements specified, returning 0% match")
+            return 0.0
+
+        candidate_counts = candidate_counts[active_mask]
+        requested_counts = requested_counts[active_mask]
+
+        # Apply same mask to exact_match array
+        if exact_match is not None:
+            exact_match_array = np.array(exact_match).astype(bool)[active_mask]
+        else:
+            exact_match_array = None
+    else:
+        # No mask provided, filter by requested counts > 0
+        active_mask = requested_counts > 0
+
+        if not np.any(active_mask):
+            # No room requirements specified
+            print("WARNING: No room requirements specified, returning 0% match")
+            return 0.0
+
+        candidate_counts = candidate_counts[active_mask]
+        requested_counts = requested_counts[active_mask]
+
+        # Apply same filter to exact_match array
+        if exact_match is not None:
+            exact_match_array = np.array(exact_match).astype(bool)[active_mask]
+        else:
+            exact_match_array = None
+
+    total_requested = np.sum(requested_counts)
+
+    # Debug logging
+    print(f"Candidate counts (filtered): {candidate_counts}")
+    print(f"Requested counts (filtered): {requested_counts}")
+    print(f"Exact match required (filtered): {exact_match_array}")
+    print(f"Total requested: {total_requested}")
+
+    # Calculate matched counts based on exact_match requirements
+    if exact_match_array is not None:
+        matched_counts = np.zeros_like(requested_counts)
+        for i in range(len(requested_counts)):
+            if exact_match_array[i]:
+                # Exact match required: only count if candidate == requested
+                if candidate_counts[i] == requested_counts[i]:
+                    matched_counts[i] = requested_counts[i]
+                else:
+                    matched_counts[i] = 0
+            else:
+                # At least match: count min(candidate, requested)
+                matched_counts[i] = min(candidate_counts[i], requested_counts[i])
+    else:
+        # If no exact_match specified, use "at least" logic for all
+        matched_counts = np.minimum(candidate_counts, requested_counts)
+
+    total_matched = np.sum(matched_counts)
+
+    print(f"Matched counts: {matched_counts}, Total matched: {total_matched}")
+
+    percentage = (total_matched / total_requested) * 100.0
+    print(f"Match percentage: {percentage}%")
+
+    return percentage
+
+
 def NumSearch(request):
     start = time.perf_counter()
     data_new = json.loads(request.GET.get("userInfo"))
@@ -285,16 +438,87 @@ def NumSearch(request):
         filter_func = get_filter_func(roomactarr, roomexaarr, roomnumarr)
         indices = np.where(list(map(filter_func, test_num)))
         indices = list(indices)
-        if len(indices[0]) < 20:
-            topk = len(indices[0])
-        else:
-            topk = 20
+
         topkList.clear()
-        for i in range(topk):
-            topkList.append(str(trainNameList[int(test_data_topk[indices[0][i]])]) + ".png")
+
+        # FALLBACK: If hard filter returns no results, use similarity scoring
+        if len(indices[0]) == 0:
+            print("NumSearch: Hard filter returned no results. Using similarity-based fallback.")
+
+            # Compute TF distances for all candidates
+            x, y = rt.compute_tf(data.boundary)
+            y_sampled = rt.sample_tf(x, y, 1000)
+            tf_distances = np.linalg.norm(y_sampled - tf_train[test_data_topk], axis=1)
+
+            # Compute similarity scores
+            scores = compute_similarity_scores(
+                candidate_rNum=test_num,
+                candidate_eNum=None,  # No edge data in NumSearch
+                requested_rNum=roomnumarr,
+                requested_edge=None,
+                tf_distances=tf_distances,
+                mask=roomactarr,
+                alpha=0.5,  # Room count weight
+                beta=0.0,   # No edge data
+                gamma=0.5   # Boundary similarity weight
+            )
+
+            # Sort by similarity score (lower is better)
+            sorted_indices = np.argsort(scores)
+            topk = min(20, len(sorted_indices))
+
+            for i in range(topk):
+                candidate_idx = test_data_topk[sorted_indices[i]]
+                floor_plan_name = str(trainNameList[int(candidate_idx)]) + ".png"
+
+                # Calculate match percentage
+                match_percentage = calculate_room_match_percentage(
+                    test_num[sorted_indices[i]],
+                    roomnumarr,
+                    roomactarr,
+                    roomexaarr
+                )
+
+                # Return as object with name and match percentage
+                topkList.append({
+                    "name": floor_plan_name,
+                    "match": round(match_percentage, 1),
+                    "fallback": True  # Indicates this used fallback matching
+                })
+        else:
+            # Original hard filter logic
+            if len(indices[0]) < 20:
+                topk = len(indices[0])
+            else:
+                topk = 20
+
+            for i in range(topk):
+                floor_plan_name = str(trainNameList[int(test_data_topk[indices[0][i]])]) + ".png"
+
+                # Calculate match percentage (should be 100% for hard filter results)
+                match_percentage = calculate_room_match_percentage(
+                    test_num[indices[0][i]],
+                    roomnumarr,
+                    roomactarr,
+                    roomexaarr
+                )
+
+                # Return as object with name and match percentage
+                topkList.append({
+                    "name": floor_plan_name,
+                    "match": round(match_percentage, 1),
+                    "fallback": False  # Hard filter match
+                })
+
     end = time.perf_counter()
     print('NumberSearch time: %s Seconds' % (end - start))
-    return HttpResponse(json.dumps(topkList), content_type="application/json")
+
+    # Return both old format (for backward compatibility) and new format (with metadata)
+    response_data = {
+        "floorPlans": [item["name"] for item in topkList],  # Old format for UI compatibility
+        "metadata": topkList  # New format with match scores
+    }
+    return HttpResponse(json.dumps(response_data), content_type="application/json")
 
 
 def FindTraindata(trainname):
@@ -926,25 +1150,103 @@ def GraphSearch(request):
     eNumData = []
    
     indices = np.where(list(map(filter_graphfunc, test_num)))
-
     indices = list(indices)
-    tf_trainsub=tf_train[test_data_topk[indices[0]]]
-    re_data = train_data[test_data_topk[indices[0]]]
-    test_data_tftopk=retrieve_bf(tf_trainsub, data, k=20)
-    re_data=re_data[test_data_tftopk]
-    if len(re_data) < 20:
-        topk = len(re_data)
-    else:
-        topk = 20
+
     topkList = []
-    for i in range(topk):
-        topkList.append(str(re_data[i].name) + ".png")
-        
-    e=time.perf_counter()
+
+    # FALLBACK: If hard filter returns no results, use similarity scoring
+    if len(indices[0]) == 0:
+        print("GraphSearch: Hard filter returned no results. Using similarity-based fallback.")
+
+        # Get all candidates from test_data_topk for similarity scoring
+        candidate_indices = test_data_topk
+
+        # Compute TF distances for all candidates
+        x, y = rt.compute_tf(data.boundary)
+        y_sampled = rt.sample_tf(x, y, 1000)
+        tf_distances = np.linalg.norm(y_sampled - tf_train[candidate_indices], axis=1)
+
+        # Get room counts and edge data for similarity scoring
+        candidate_rNum = train_data_rNum[candidate_indices]
+        candidate_eNum = train_data_eNum[candidate_indices]
+
+        # Compute similarity scores
+        scores = compute_similarity_scores(
+            candidate_rNum=candidate_rNum,
+            candidate_eNum=candidate_eNum,
+            requested_rNum=roomnumarr,
+            requested_edge=edge.flatten(),
+            tf_distances=tf_distances,
+            mask=roomactarr,
+            alpha=0.35,  # Room count weight
+            beta=0.35,   # Edge structure weight
+            gamma=0.30   # Boundary similarity weight
+        )
+
+        # Sort by similarity score (lower is better)
+        sorted_indices = np.argsort(scores)
+        topk = min(20, len(sorted_indices))
+
+        for i in range(topk):
+            candidate_idx = candidate_indices[sorted_indices[i]]
+            floor_plan_name = str(trainNameList[int(candidate_idx)]) + ".png"
+
+            # Calculate match percentage
+            match_percentage = calculate_room_match_percentage(
+                candidate_rNum[sorted_indices[i]],
+                roomnumarr,
+                roomactarr,
+                roomexaarr
+            )
+
+            # Return as object with name and match percentage
+            topkList.append({
+                "name": floor_plan_name,
+                "match": round(match_percentage, 1),
+                "fallback": True  # Indicates this used fallback matching
+            })
+    else:
+        # Original hard filter logic
+        tf_trainsub = tf_train[test_data_topk[indices[0]]]
+        re_data = train_data[test_data_topk[indices[0]]]
+        test_data_tftopk = retrieve_bf(tf_trainsub, data, k=20)
+        re_data = re_data[test_data_tftopk]
+
+        if len(re_data) < 20:
+            topk = len(re_data)
+        else:
+            topk = 20
+
+        for i in range(topk):
+            floor_plan_name = str(re_data[i].name) + ".png"
+
+            # Calculate match percentage for hard filter results
+            candidate_idx = trainNameList.index(re_data[i].name)
+            match_percentage = calculate_room_match_percentage(
+                train_data_rNum[candidate_idx],
+                roomnumarr,
+                roomactarr,
+                roomexaarr
+            )
+
+            # Return as object with name and match percentage
+            topkList.append({
+                "name": floor_plan_name,
+                "match": round(match_percentage, 1),
+                "fallback": False  # Hard filter match
+            })
+
+    e = time.perf_counter()
     print('Graph Search time: %s Seconds' % (e - s))
 
     print("topkList", topkList)
-    return HttpResponse(json.dumps(topkList), content_type="application/json")
+
+    # Return both old format (for backward compatibility) and new format (with metadata)
+    response_data = {
+        "floorPlans": [item["name"] for item in topkList],  # Old format for UI compatibility
+        "metadata": topkList  # New format with match scores
+    }
+    return HttpResponse(json.dumps(response_data), content_type="application/json")
 
 
 def retrieve_bf(tf_trainsub, datum, k=20):

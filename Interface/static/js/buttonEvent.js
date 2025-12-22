@@ -176,9 +176,10 @@ function RightInit() {
 
 }
 
-function ListBox(ret, rooms) {
+function ListBox(ret, rooms, metadata) {
     var roomList = ret;
     console.log("roomList" + roomList);
+    console.log("metadata", metadata);
     var hsList = document.getElementById('hsList');
     while (hsList.hasChildNodes()) {
         hsList.removeChild(hsList.firstChild);
@@ -186,7 +187,29 @@ function ListBox(ret, rooms) {
     for (var i = roomList.length - 1; i >= 0; i--) {
         var hs = roomList[i];
         var itembt = document.createElement('button');
-        itembt.innerHTML = ret[i].split(".")[0];
+
+        // Create the main title with floor plan name
+        var titleText = ret[i].split(".")[0];
+
+        // Add match percentage if metadata is available
+        if (metadata && metadata[i]) {
+            var matchInfo = metadata[i];
+            var matchPercent = matchInfo.match;
+            var isFallback = matchInfo.fallback;
+
+            // Create a styled match percentage badge
+            var matchBadge = document.createElement('span');
+            matchBadge.textContent = matchPercent + '%';
+            matchBadge.style.cssText = 'float: right; background-color: ' +
+                (isFallback ? '#FFA500' : '#4CAF50') + // Orange for fallback, green for exact match
+                '; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-left: 5px;';
+
+            itembt.innerHTML = titleText;
+            itembt.appendChild(matchBadge);
+        } else {
+            itembt.innerHTML = titleText;
+        }
+
         itembt.classList.add('api-title');
         itembt.classList.add('pngls');
         itembt.id = "Btn_" + ret[i];
@@ -274,7 +297,8 @@ function NumSearch() {
     $.get("/index/NumSearch/", {'userInfo': JSON.stringify(rooms)}, function (ret) {
         // Handle new response format with backward compatibility
         var floorPlans = ret.floorPlans || ret;  // Use floorPlans if available, otherwise fall back to old format
-        ListBox(floorPlans, rooms);
+        var metadata = ret.metadata || null;  // Get metadata if available
+        ListBox(floorPlans, rooms, metadata);
     });
 }
 
@@ -720,7 +744,8 @@ function GraphSearch() {
     }, function (ret) {
         // Handle new response format with backward compatibility
         var floorPlans = ret.floorPlans || ret;  // Use floorPlans if available, otherwise fall back to old format
-        ListBox(floorPlans, rooms)
+        var metadata = ret.metadata || null;  // Get metadata if available
+        ListBox(floorPlans, rooms, metadata)
     });
 }
 

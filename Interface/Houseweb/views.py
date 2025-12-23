@@ -642,7 +642,6 @@ def TransGraph(request):
 
     rooms = fp_end.get_rooms(tensor=False)
 
-    
     center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in fp_end.data.box[:, :4]]
 
     # boxes_pred

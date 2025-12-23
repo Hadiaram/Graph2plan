@@ -1,6 +1,8 @@
 from django.shortcuts import render # type: ignore
 from django.http import HttpResponse, JsonResponse # type: ignore
+from django.conf import settings # type: ignore
 import json
+import os
 import model.test as mltest
 import model.utils as mdul
 from model.floorplan import *
@@ -615,8 +617,13 @@ def TransGraph(request):
     mlresult = mltest.get_userinfo(testname, trainname)
 
     fp_end = mlresult
-   
-    sio.savemat("./static/" + userInfo.split(',')[0].split('.')[0] + ".mat", {"data": fp_end.data})
+
+    # Use absolute path for static directory
+    static_dir = os.path.join(settings.BASE_DIR, 'static')
+    os.makedirs(static_dir, exist_ok=True)  # Ensure directory exists
+    mat_filename = userInfo.split(',')[0].split('.')[0] + ".mat"
+    mat_filepath = os.path.join(static_dir, mat_filename)
+    sio.savemat(mat_filepath, {"data": fp_end.data})
 
     data_js = {}
     # fp_end  hsedge
@@ -1247,6 +1254,148 @@ def GraphSearch(request):
         "metadata": topkList  # New format with match scores
     }
     return HttpResponse(json.dumps(response_data), content_type="application/json")
+
+
+def AutoAdjustGraph(request):
+    """
+    Automatically adjust the graph by adding missing rooms and removing excess rooms
+    based on user requirements.
+    """
+    print("=== AutoAdjustGraph called ===")
+
+    # Get data from request
+    NewGraph = json.loads(request.GET.get("NewGraph"))
+    Numrooms = json.loads(request.GET.get("Numrooms"))
+
+    newNode = NewGraph[0]  # [[index, roomname, x, y, scalesize], ...]
+    newEdge = NewGraph[1]  # [[u, v], ...]
+
+    roomactarr = Numrooms[0]  # Which room types are active
+    roomexaarr = Numrooms[1]  # Exact match requirements
+    roomnumarr = [int(x) for x in Numrooms[2]]  # Requested room counts
+
+    print(f"Current nodes: {len(newNode)}")
+    print(f"Current edges: {len(newEdge)}")
+    print(f"Room requirements: {roomnumarr}")
+
+    # Room type mappings
+    room_idx_to_name = {
+        0: 'LivingRoom', 1: 'MasterRoom', 2: 'Kitchen', 3: 'Bathroom',
+        4: 'DiningRoom', 5: 'ChildRoom', 6: 'StudyRoom', 7: 'SecondRoom',
+        8: 'GuestRoom', 9: 'Balcony', 10: 'Entrance', 11: 'Storage', 12: 'Wall-in'
+    }
+
+    # Bedroom types (they can be grouped)
+    bedroom_types = ['MasterRoom', 'ChildRoom', 'StudyRoom', 'SecondRoom', 'GuestRoom']
+
+    # Count current rooms by type
+    current_room_counts = {i: 0 for i in range(13)}
+    for indx, rmname, x, y, scalesize in newNode:
+        for room_idx, room_name in room_idx_to_name.items():
+            if rmname == room_name or (room_name == 'MasterRoom' and rmname in bedroom_types):
+                if room_name == 'MasterRoom' and rmname in bedroom_types:
+                    # All bedrooms count towards bedroom count (index 1)
+                    current_room_counts[1] += 1
+                else:
+                    current_room_counts[room_idx] += 1
+                break
+
+    print(f"Current room counts: {current_room_counts}")
+
+    # Determine which rooms to add/remove
+    rooms_to_add = []
+    rooms_to_remove = []
+
+    for room_idx in range(13):
+        if not roomactarr[room_idx]:  # Skip inactive room types
+            continue
+
+        current_count = current_room_counts[room_idx]
+        requested_count = roomnumarr[room_idx]
+
+        if requested_count > current_count:
+            # Need to add rooms
+            num_to_add = requested_count - current_count
+            room_name = room_idx_to_name[room_idx]
+            for _ in range(num_to_add):
+                rooms_to_add.append(room_name)
+        elif requested_count < current_count:
+            # Need to remove rooms (only if exact match required)
+            if roomexaarr[room_idx]:
+                num_to_remove = current_count - requested_count
+                room_name = room_idx_to_name[room_idx]
+                rooms_to_remove.append((room_name, num_to_remove))
+
+    print(f"Rooms to add: {rooms_to_add}")
+    print(f"Rooms to remove: {rooms_to_remove}")
+
+    # Calculate average position for placing new nodes
+    if len(newNode) > 0:
+        avg_x = sum([x for _, _, x, _, _ in newNode]) / len(newNode)
+        avg_y = sum([y for _, _, y, _, _ in newNode]) / len(newNode)
+    else:
+        avg_x, avg_y = 128, 128  # Default center position
+
+    # Add new rooms
+    next_index = max([int(indx) for indx, _, _, _, _ in newNode]) + 1 if len(newNode) > 0 else 0
+
+    for room_name in rooms_to_add:
+        # Place new room at average position with slight offset
+        offset = (next_index % 5) * 20  # Spread them out a bit
+        new_x = avg_x + offset
+        new_y = avg_y + offset
+        newNode.append([next_index, room_name, new_x, new_y, 1])  # Default scale = 1
+        next_index += 1
+
+    # Remove excess rooms (remove from the end first)
+    for room_name, count_to_remove in rooms_to_remove:
+        removed = 0
+        # Remove from the end of the list
+        for i in range(len(newNode) - 1, -1, -1):
+            if removed >= count_to_remove:
+                break
+            indx, rmname, x, y, scalesize = newNode[i]
+            if rmname == room_name or (room_name == 'MasterRoom' and rmname in bedroom_types):
+                # Remove this node
+                removed_index = int(indx)
+                newNode.pop(i)
+                # Remove all edges connected to this node
+                newEdge = [[u, v] for u, v in newEdge if int(u) != removed_index and int(v) != removed_index]
+                removed += 1
+
+    # Recalculate edges: connect new nodes to existing nodes
+    # Simple strategy: connect each new node to its nearest neighbor
+    for new_indx, new_rmname, new_x, new_y, new_scalesize in newNode:
+        # Check if this node has any edges
+        has_edge = any(int(u) == int(new_indx) or int(v) == int(new_indx) for u, v in newEdge)
+
+        if not has_edge and len(newNode) > 1:
+            # Find nearest neighbor
+            min_dist = float('inf')
+            nearest_indx = None
+
+            for indx, rmname, x, y, scalesize in newNode:
+                if int(indx) == int(new_indx):
+                    continue
+                dist = ((new_x - x) ** 2 + (new_y - y) ** 2) ** 0.5
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest_indx = indx
+
+            if nearest_indx is not None:
+                # Add edge to nearest neighbor
+                newEdge.append([new_indx, nearest_indx])
+
+    print(f"Adjusted nodes: {len(newNode)}")
+    print(f"Adjusted edges: {len(newEdge)}")
+
+    # Return the adjusted graph
+    result = {
+        "nodes": newNode,
+        "edges": newEdge
+    }
+
+    return HttpResponse(json.dumps(result), content_type="application/json")
 
 
 def retrieve_bf(tf_trainsub, datum, k=20):

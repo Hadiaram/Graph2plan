@@ -752,6 +752,9 @@ function GraphSearch() {
 function CreateLeftGraph(rooms, roomID) {
     $.getJSON("/index/TransGraph/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
         //     $.getJSON("/index/TransGraph_net/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
+        // Show Auto-Adjust button when graph is transferred
+        document.getElementById("AutoAdjust").style.display = "block";
+
         document.getElementById("Generate").onclick = function () {
             var AdjustNewGraph = [];
             AdjustNewGraph = GetEditGraph(ret['rmpos']);
@@ -779,6 +782,70 @@ function CreateLeftGraph(rooms, roomID) {
                     }
                     Circlesize.attr("r", adjust_ret['rmsize'][i][0]);
                 }
+            });
+        };
+
+        // Auto-Adjust button handler
+        document.getElementById("AutoAdjust").onclick = function () {
+            console.log("Auto-Adjust clicked!");
+
+            // Get current graph state
+            var currentGraph = GetEditGraph(0);
+
+            // Get user requirements
+            var obj = Num();
+            var Numrooms = [];
+            Numrooms.push(obj.roomactarr);
+            Numrooms.push(obj.roomexaarr);
+            Numrooms.push(obj.roomnumarr);
+
+            console.log("Current graph:", currentGraph);
+            console.log("Room requirements:", Numrooms);
+
+            // Call backend to auto-adjust
+            $.get("/index/AutoAdjustGraph/", {
+                'NewGraph': JSON.stringify(currentGraph),
+                'Numrooms': JSON.stringify(Numrooms)
+            }, function (result) {
+                console.log("Auto-adjust result:", result);
+
+                // Clear existing graph
+                d3.select('body').select('#LeftGraphSVG').selectAll('.TransLine').remove();
+                d3.select('body').select('#LeftGraphSVG').selectAll('.TransCircle').remove();
+
+                // Draw adjusted edges
+                for (var i = 0; i < result.edges.length; i++) {
+                    var u = result.edges[i][0];
+                    var v = result.edges[i][1];
+
+                    // Find node positions
+                    var node_u = result.nodes.find(n => n[0] == u);
+                    var node_v = result.nodes.find(n => n[0] == v);
+
+                    if (node_u && node_v) {
+                        var id = "TransLine_" + u + "_" + v + "_0";
+                        CreateLine(node_u[2], node_u[3], node_v[2], node_v[3], id);
+                    }
+                }
+
+                // Draw adjusted nodes
+                for (var i = 0; i < result.nodes.length; i++) {
+                    var indx = result.nodes[i][0];
+                    var rmname = result.nodes[i][1];
+                    var x = result.nodes[i][2];
+                    var y = result.nodes[i][3];
+                    var scalesize = result.nodes[i][4];
+
+                    var id = "TransCircle_" + indx + "_" + rmname;
+                    CreateCircle(x, y, id, 5);
+                    d3.select("body").select("#LeftGraphSVG").select("#" + id).attr('scalesize', scalesize);
+                }
+
+                // Update room count cookie
+                document.cookie = "RoomNum=" + result.nodes.length;
+
+                console.log("Graph auto-adjusted successfully!");
+                alert("Graph auto-adjusted! Added/removed rooms to match your requirements.");
             });
         };
 

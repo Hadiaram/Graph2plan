@@ -382,22 +382,13 @@ def calculate_room_match_percentage(candidate_rNum, requested_rNum, mask=None, e
     print(f"Exact match required (filtered): {exact_match_array}")
     print(f"Total requested: {total_requested}")
 
-    # Calculate matched counts based on exact_match requirements
-    if exact_match_array is not None:
-        matched_counts = np.zeros_like(requested_counts)
-        for i in range(len(requested_counts)):
-            if exact_match_array[i]:
-                # Exact match required: only count if candidate == requested
-                if candidate_counts[i] == requested_counts[i]:
-                    matched_counts[i] = requested_counts[i]
-                else:
-                    matched_counts[i] = 0
-            else:
-                # At least match: count min(candidate, requested)
-                matched_counts[i] = min(candidate_counts[i], requested_counts[i])
-    else:
-        # If no exact_match specified, use "at least" logic for all
-        matched_counts = np.minimum(candidate_counts, requested_counts)
+    # Calculate matched counts based on distance from exact match
+    # Penalize both excess and missing rooms
+    # Formula: matched = max(0, requested - |candidate - requested|)
+    # Example: requested=1, candidate=2 → matched = max(0, 1 - 1) = 0
+    # Example: requested=2, candidate=2 → matched = max(0, 2 - 0) = 2
+    differences = np.abs(candidate_counts - requested_counts)
+    matched_counts = np.maximum(0, requested_counts - differences)
 
     total_matched = np.sum(matched_counts)
 
@@ -1380,12 +1371,41 @@ def AutoAdjustGraph(request):
     # Add new rooms
     next_index = max([int(indx) for indx, _, _, _, _ in newNode]) + 1 if len(newNode) > 0 else 0
 
+    # Minimum distance from existing nodes
+    min_distance = 30  # pixels
+
     for room_name in rooms_to_add:
-        # Place new room randomly within boundary bounds
-        new_x = random.uniform(min_x, max_x)
-        new_y = random.uniform(min_y, max_y)
+        # Try to find a position away from existing nodes
+        max_attempts = 50
+        best_x, best_y = None, None
+        best_min_dist = 0
+
+        for attempt in range(max_attempts):
+            # Generate random position within boundary
+            candidate_x = random.uniform(min_x, max_x)
+            candidate_y = random.uniform(min_y, max_y)
+
+            # Calculate minimum distance to any existing node
+            if len(newNode) > 0:
+                min_dist_to_existing = min(
+                    ((candidate_x - x) ** 2 + (candidate_y - y) ** 2) ** 0.5
+                    for _, _, x, y, _ in newNode
+                )
+            else:
+                min_dist_to_existing = float('inf')
+
+            # Keep track of the best position (furthest from existing nodes)
+            if min_dist_to_existing > best_min_dist:
+                best_min_dist = min_dist_to_existing
+                best_x, best_y = candidate_x, candidate_y
+
+            # If we found a position far enough away, use it
+            if min_dist_to_existing >= min_distance:
+                break
+
+        new_x, new_y = best_x, best_y
         newNode.append([next_index, room_name, new_x, new_y, 1])  # Default scale = 1
-        print(f"Added {room_name} at ({new_x:.1f}, {new_y:.1f})")
+        print(f"Added {room_name} at ({new_x:.1f}, {new_y:.1f}), min distance from existing: {best_min_dist:.1f}px")
         next_index += 1
 
     # Remove excess rooms (remove from the end first)

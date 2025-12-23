@@ -1,0 +1,603 @@
+# Session Notes - December 23, 2025
+
+## Session Overview
+
+This session focused on fixing critical bugs in the transfer and auto-adjustment workflow, resolving room type mapping issues, and improving the similarity scoring accuracy.
+
+---
+
+## Issues Fixed
+
+### 1. TransGraph FileNotFoundError (CRITICAL FIX)
+
+**Problem**:
+```
+FileNotFoundError: [Errno 2] No such file or directory: './static/14035.mat'
+```
+
+**Root Cause**: Using relative path `./static/` which resolved incorrectly depending on Django's working directory.
+
+**Solution** (`views.py:621-626`):
+```python
+# Use absolute path for static directory
+static_dir = os.path.join(settings.BASE_DIR, 'static')
+os.makedirs(static_dir, exist_ok=True)  # Ensure directory exists
+mat_filename = userInfo.split(',')[0].split('.')[0] + ".mat"
+mat_filepath = os.path.join(static_dir, mat_filename)
+sio.savemat(mat_filepath, {"data": fp_end.data})
+```
+
+**Files Modified**:
+- `views.py`: Added `import os` (line 5) and `from django.conf import settings` (line 3)
+- Changed relative path to absolute path using `settings.BASE_DIR`
+
+---
+
+### 2. Room Type Index Mapping Mismatch (ARCHITECTURAL ISSUE)
+
+**Problem**: Frontend and backend use different room type index mappings, causing incorrect filtering.
+
+**Frontend Mapping** (dealselect.js):
+```
+Index 0: LivingRoom
+Index 1: MasterRoom
+Index 2: Kitchen
+Index 3: Bathroom
+Index 4: DiningRoom (but stored in index 4 on frontend)
+Index 9: Balcony (but stored differently)
+Index 13: Total Bedroom Count (special case!)
+```
+
+**Backend Mapping** (mdul.room_label):
+```
+Index 0: LivingRoom
+Index 1: MasterRoom
+Index 2: Kitchen
+Index 3: Bathroom
+Index 4: DiningRoom
+Index 5: ChildRoom
+Index 6: StudyRoom
+Index 7: SecondRoom
+Index 8: GuestRoom
+Index 9: Balcony
+Index 10: Entrance
+Index 11: Storage
+Index 12: Wall-in
+(No index 13!)
+```
+
+**Why This Works in Search**: The pre-computed `train_data_rNum` numpy array was created using the frontend mapping, so NumSearch/GraphSearch work correctly.
+
+**Why TransGraph Filtering Failed**: We tried to filter `fp_end.get_rooms()` which returns backend mapping indices, using frontend mapping requirements.
+
+**Solution**: Don't filter in TransGraph. Use AutoAdjustGraph instead (Option 1).
+
+---
+
+### 3. AutoAdjustGraph URL Route Missing
+
+**Problem**:
+```
+Not Found: /index/AutoAdjustGraph/
+```
+
+**Solution** (`urls.py:37`):
+```python
+path(r'index/AutoAdjustGraph/', views.AutoAdjustGraph),
+```
+
+**Restart Required**: Django must be restarted after URL changes.
+
+---
+
+### 4. Smart Node Placement in AutoAdjustGraph
+
+**Problem**: New nodes were placed at average position with small offset, causing overlap and poor visibility.
+
+**Solution** (`views.py:1383-1418`):
+```python
+# Minimum distance from existing nodes
+min_distance = 30  # pixels
+
+for room_name in rooms_to_add:
+    # Try to find a position away from existing nodes
+    max_attempts = 50
+    best_x, best_y = None, None
+    best_min_dist = 0
+
+    for attempt in range(max_attempts):
+        # Generate random position within boundary
+        candidate_x = random.uniform(min_x, max_x)
+        candidate_y = random.uniform(min_y, max_y)
+
+        # Calculate minimum distance to any existing node
+        if len(newNode) > 0:
+            min_dist_to_existing = min(
+                ((candidate_x - x) ** 2 + (candidate_y - y) ** 2) ** 0.5
+                for _, _, x, y, _ in newNode
+            )
+        else:
+            min_dist_to_existing = float('inf')
+
+        # Keep track of the best position (furthest from existing nodes)
+        if min_dist_to_existing > best_min_dist:
+            best_min_dist = min_dist_to_existing
+            best_x, best_y = candidate_x, candidate_y
+
+        # If we found a position far enough away, use it
+        if min_dist_to_existing >= min_distance:
+            break
+
+    new_x, new_y = best_x, best_y
+    newNode.append([next_index, room_name, new_x, new_y, 1])
+```
+
+**Features**:
+- Tries up to 50 random positions
+- Selects position furthest from existing nodes
+- Stops early if finds spot 30+ pixels away
+- Gets boundary from test data for realistic placement
+- Falls back to estimating bounds from existing nodes
+
+**Files Modified**:
+- Added `import random` at top of views.py (line 6)
+
+---
+
+### 5. Hardcoded LivingRoom Requirement (BUG FIX)
+
+**Problem**: Match percentages were inflated because LivingRoom was automatically added to every search.
+
+**Example**:
+- User requests: 2 bedrooms, 1 bathroom, 2 balconies
+- Actual request sent: **1 LivingRoom** + 2 bedrooms + 1 bathroom + 2 balconies
+- Total requested: 6 (not 5!)
+- Floor plan with 0 LivingRooms → always loses 1 match
+
+**Root Cause** (`dealselect.js:745`):
+```javascript
+roomactarr[0]=1;roomexaarr[0] = 1;roomnumarr[0] = 1;  // Forced LivingRoom!
+```
+
+**Solution** (`dealselect.js:745-750`):
+```javascript
+// Initialize all to 0 (removed hardcoded LivingRoom requirement)
+for (i = 0; i < 14; i++) {
+    roomactarr[i] = 0;
+    roomexaarr[i] = 0;
+    roomnumarr[i] = 0;
+}
+```
+
+**Impact**: Match percentages now accurately reflect only the rooms actually requested.
+
+---
+
+### 6. Exact Match Scoring Logic (BUG FIX)
+
+**Problem**: Exact match was all-or-nothing. If you requested exactly 1 bathroom and got 2, it counted as **0 matched** instead of 1.
+
+**Old Logic** (`views.py:389-394`):
+```python
+if exact_match_array[i]:
+    if candidate_counts[i] == requested_counts[i]:
+        matched_counts[i] = requested_counts[i]  # Full credit
+    else:
+        matched_counts[i] = 0  # NO CREDIT - too harsh!
+```
+
+**New Logic** (`views.py:385-389`):
+```python
+# Calculate matched counts based on exact_match requirements
+# Note: Both exact match and "at least" now use min() logic
+# The difference is that exact match rooms will be filtered/adjusted in AutoAdjustGraph
+# but for similarity scoring, we count partial overlap
+matched_counts = np.minimum(candidate_counts, requested_counts)
+```
+
+**Impact**: Match percentages now give partial credit for overlap:
+- Request 1 bathroom, has 2 → counts 1 matched (not 0)
+- Request 3 bathrooms, has 2 → counts 2 matched (not 0)
+
+**Distinction**:
+- **"At least" mode**: Counts overlap, AutoAdjustGraph won't remove excess
+- **Exact match mode**: Counts overlap, AutoAdjustGraph **will** remove excess
+
+---
+
+## Current Workflow
+
+### 1. Search Phase
+```
+User sets filters → NumSearch/GraphSearch →
+Returns top 20 results with match percentages →
+Results sorted by similarity score (lower = better)
+```
+
+### 2. Transfer Phase
+```
+User clicks result → Transfer button →
+TransGraph loads floor plan to left editing area →
+Floor plan transferred AS-IS (no filtering)
+```
+
+### 3. Auto-Adjust Phase (NEW!)
+```
+User clicks Auto-Adjust button →
+AutoAdjustGraph analyzes requirements →
+Removes excess nodes (if exact match) →
+Adds missing nodes (randomly placed, no edges) →
+Graph updated on screen
+```
+
+### 4. Layout Generation
+```
+User clicks Layout button →
+Edge prediction model runs (future work) →
+Floor plan rendered with rooms and connections
+```
+
+---
+
+## Key Design Decisions
+
+### Why Not Filter in TransGraph?
+
+**Attempted Approach**: Filter nodes during transfer based on user requirements.
+
+**Why It Failed**:
+1. Frontend/backend room index mapping mismatch
+2. `fp_end.get_rooms()` returns backend mapping
+3. User requirements use frontend mapping
+4. Complex conversion logic error-prone
+
+**Final Approach**: Keep TransGraph simple, use AutoAdjustGraph post-transfer.
+
+**Benefits**:
+- Separation of concerns
+- User sees original floor plan first
+- Explicit user action for modification
+- Works correctly with mapping issues
+
+---
+
+## Similarity Scoring System
+
+### Two Different Scores (Explained for Clarity)
+
+#### 1. Similarity Score (Internal Ranking)
+**Purpose**: Sort floor plans from best to worst match
+
+**Formula**:
+```
+score = 0.35 × room_distance + 0.35 × edge_distance + 0.30 × boundary_distance
+```
+
+**Components**:
+- **Room Distance**: L1 norm between room counts
+- **Edge Distance**: L1 norm between adjacency patterns
+- **Boundary Distance**: L2 norm between Turn Function vectors
+
+**Interpretation**: Lower score = better match
+
+**Where Used**: Sorting results in NumSearch/GraphSearch fallback
+
+---
+
+#### 2. Match Percentage (User-Facing Display)
+**Purpose**: Show user how well a floor plan matches their requirements
+
+**Formula**:
+```
+Match % = (Total Rooms Matched / Total Rooms Requested) × 100
+```
+
+**Logic**:
+```python
+matched_counts = np.minimum(candidate_counts, requested_counts)
+```
+
+**Example**:
+- Request: 2 bedrooms, 1 bathroom, 2 balconies (total: 5)
+- Candidate: 2 bedrooms, 2 bathrooms, 2 balconies
+- Matched: min(2,2) + min(2,1) + min(2,2) = 2 + 1 + 2 = 5
+- Percentage: 5/5 × 100 = **100%**
+
+**Where Used**: Displayed as colored badge next to each result
+
+---
+
+## File Changes Summary
+
+### Modified Files
+
+1. **`Houseweb/views.py`**
+   - Added imports: `os`, `random`, `settings`
+   - Fixed TransGraph paths (lines 621-626)
+   - Removed TransGraph filtering logic
+   - Improved AutoAdjustGraph node placement (lines 1331-1418)
+   - Fixed exact match scoring logic (lines 385-389)
+
+2. **`House/urls.py`**
+   - Added AutoAdjustGraph route (line 37)
+
+3. **`static/select/dealselect.js`**
+   - Removed hardcoded LivingRoom requirement (lines 745-750)
+
+### No Changes Needed
+
+- **`static/js/buttonEvent.js`** - Already had Auto-Adjust button handler from previous session
+- **`templates/home.html`** - Already had Auto-Adjust button from previous session
+
+---
+
+## Testing Checklist
+
+### Basic Transfer Flow
+- [ ] Search for floor plans with filters
+- [ ] Click result to view on right
+- [ ] Click Transfer
+- [ ] Verify floor plan appears on left unchanged
+
+### Auto-Adjust with Excess Nodes
+- [ ] Filter: 2 bedrooms, 1 bathroom, 2 balconies
+- [ ] Transfer floor plan with 2 bedrooms, 2 bathrooms, 2 balconies
+- [ ] Click Auto-Adjust
+- [ ] Verify 1 bathroom removed (if exact match enabled)
+
+### Auto-Adjust with Missing Nodes
+- [ ] Filter: 2 bedrooms, 2 bathrooms, 2 balconies
+- [ ] Transfer floor plan with 2 bedrooms, 1 bathroom, 2 balconies
+- [ ] Click Auto-Adjust
+- [ ] Verify 1 bathroom added (isolated, no edges)
+- [ ] Verify new node visible and away from existing nodes
+
+### Match Percentage Accuracy
+- [ ] Floor plan: 2 bedrooms, 2 bathrooms, 2 balconies
+- [ ] Filter: 2 bedrooms, 1 bathroom, 2 balconies
+- [ ] Expected: 100% (5/5 matched)
+- [ ] Filter: 2 bedrooms, 3 bathrooms, 2 balconies
+- [ ] Expected: 85.71% (6/7 matched)
+
+### Boundary Placement
+- [ ] Auto-adjust adds missing node
+- [ ] Verify node placed within floor plan boundary
+- [ ] Verify node at least 30px from existing nodes
+- [ ] Check console logs for placement coordinates
+
+---
+
+## Known Issues & Future Work
+
+### 1. Edge Prediction for New Nodes
+**Status**: Not implemented yet
+
+**Current Behavior**: New nodes added via Auto-Adjust have no edges (isolated)
+
+**Future Work**: Train edge prediction model to connect new nodes appropriately
+
+**Temporary Workaround**: User can manually connect nodes in editing mode
+
+---
+
+### 2. Room Type Index Mapping
+**Status**: Workaround in place
+
+**Issue**: Frontend uses index 13 for "total bedrooms", backend has no index 13
+
+**Current Solution**: Don't filter in backend, use AutoAdjustGraph which reads from frontend directly
+
+**Future Work**: Unify the mappings or create explicit conversion function
+
+---
+
+### 3. Bedroom Type Grouping
+**Status**: Works but could be clearer
+
+**Current Behavior**: MasterRoom, ChildRoom, StudyRoom, SecondRoom, GuestRoom all count as "bedrooms"
+
+**Implementation**:
+- Frontend: User sees "Bedroom" filter
+- Backend: Counts all 5 bedroom types together
+- AutoAdjustGraph: Adds "MasterRoom" by default when adding bedrooms
+
+**Potential Improvement**: Let user specify which bedroom type to add
+
+---
+
+### 4. Match Percentage Debug Logging
+**Status**: Verbose console output
+
+**Current Behavior**: Every match calculation prints debug info:
+```python
+print(f"Candidate counts (filtered): {candidate_counts}")
+print(f"Requested counts (filtered): {requested_counts}")
+print(f"Total matched: {total_matched}")
+print(f"Match percentage: {percentage}%")
+```
+
+**Location**: `views.py:380-407`
+
+**Future Work**: Remove or move to proper logging framework
+
+---
+
+## Debugging Tips
+
+### Match Percentage Seems Wrong
+
+1. **Check console output** for `calculate_room_match_percentage` logs
+2. **Verify filter settings** - exact match vs "at least"
+3. **Check for hardcoded requirements** - ensure dealselect.js line 745 is fixed
+4. **Look at active mask** - only rooms with requested > 0 are counted
+
+### Auto-Adjust Not Working
+
+1. **Check URL route** - ensure `AutoAdjustGraph` in urls.py
+2. **Restart Django** - URL changes require restart
+3. **Check console** for JavaScript errors
+4. **Verify button shows** - should appear after Transfer
+
+### New Nodes Overlap Existing
+
+1. **Check boundary detection** - look for "Boundary bounds" in console
+2. **Adjust min_distance** - currently 30px (line 1384 in views.py)
+3. **Check max_attempts** - currently 50 tries (line 1388 in views.py)
+
+### FileNotFoundError on Transfer
+
+1. **Check static directory exists** - `C:\Users\hmbashir\source\Graph2plan\Interface\static\`
+2. **Verify path construction** - should use `settings.BASE_DIR`
+3. **Check permissions** - Django must have write access
+
+---
+
+## Architecture Notes
+
+### Data Flow: Filter → Search → Transfer → Adjust
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ USER SETS FILTERS (dealselect.js)                      │
+│ - Selects room types, counts, exact match              │
+│ - Num() function creates roomactarr, roomexaarr, etc   │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ SEARCH (NumSearch/GraphSearch in views.py)             │
+│ - Hard filter using get_filter_func()                  │
+│ - If no results: Fallback using compute_similarity()   │
+│ - Calculate match % using calculate_room_match_%()     │
+│ - Return top 20 with metadata                          │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ DISPLAY RESULTS (buttonEvent.js → ListBox)             │
+│ - Show floor plan names                                │
+│ - Display match percentage badges                      │
+│ - Green badge = exact match, Orange = fallback         │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ TRANSFER (TransGraph in views.py)                      │
+│ - Load floor plan from trainNameList                   │
+│ - NO FILTERING - transfer as-is                        │
+│ - Save .mat file to static directory                   │
+│ - Return nodes, edges, boundary for display            │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ AUTO-ADJUST (AutoAdjustGraph in views.py)              │
+│ - Read current graph from frontend                     │
+│ - Read requirements from Num() function                │
+│ - Remove excess nodes (if exact match)                 │
+│ - Add missing nodes (random placement, no edges)       │
+│ - Return adjusted graph for re-rendering               │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Why This Architecture Works
+
+1. **Separation of Concerns**: Each function has single responsibility
+2. **User Control**: User explicitly triggers each step
+3. **Transparency**: User sees original before modification
+4. **Avoids Mapping Issues**: AutoAdjustGraph reads from frontend directly
+5. **Extensibility**: Easy to add edge prediction later
+
+---
+
+## Code References
+
+### Key Functions
+
+| Function | File | Lines | Purpose |
+|----------|------|-------|---------|
+| `compute_similarity_scores()` | views.py | 259-321 | Rank floor plans by similarity |
+| `calculate_room_match_percentage()` | views.py | 324-409 | Calculate match % for display |
+| `get_filter_func()` | views.py | 232-245 | Hard filter for exact matches |
+| `NumSearch()` | views.py | 411-506 | Search by room counts only |
+| `GraphSearch()` | views.py | 1046-1197 | Search by room counts + graph structure |
+| `TransGraph()` | views.py | 612-664 | Transfer floor plan to editing area |
+| `AutoAdjustGraph()` | views.py | 1258-1420 | Add/remove nodes based on requirements |
+| `Num()` | dealselect.js | 705-770 | Parse UI filters into arrays |
+| `ListBox()` | buttonEvent.js | 179-263 | Display search results with badges |
+| `CreateLeftGraph()` | buttonEvent.js | 752-857 | Handle Transfer and Auto-Adjust buttons |
+
+### Important Constants
+
+| Constant | Location | Value | Purpose |
+|----------|----------|-------|---------|
+| `min_distance` | views.py:1384 | 30 | Min pixels between new and existing nodes |
+| `max_attempts` | views.py:1388 | 50 | Max tries to find good node position |
+| `padding` | views.py:1350 | 20 | Padding from boundary edges |
+| `alpha` | views.py:260 | 0.35 | Room count weight in similarity |
+| `beta` | views.py:260 | 0.35 | Edge structure weight in similarity |
+| `gamma` | views.py:260 | 0.30 | Boundary weight in similarity |
+
+---
+
+## Session Impact Summary
+
+### Bugs Fixed: 6
+1. ✅ TransGraph FileNotFoundError
+2. ✅ AutoAdjustGraph URL route missing
+3. ✅ Node placement overlap
+4. ✅ Hardcoded LivingRoom requirement
+5. ✅ All-or-nothing exact match scoring
+6. ✅ Room type mapping confusion (documented + workaround)
+
+### Features Enhanced: 2
+1. ✅ Smart node placement with distance checking
+2. ✅ Partial credit for exact match scoring
+
+### Code Quality: 3
+1. ✅ Moved random import to top of file
+2. ✅ Added helpful comments explaining logic
+3. ✅ Improved console logging for debugging
+
+### Workflow Improvements: 1
+1. ✅ Clarified Transfer → Auto-Adjust workflow (no filtering in Transfer)
+
+---
+
+## Next Steps (Recommendations)
+
+1. **Edge Prediction Model**
+   - Train model to predict edges for new nodes
+   - Input: node types, positions, boundary
+   - Output: edge connections
+
+2. **Remove Debug Logging**
+   - Clean up console.log and print statements
+   - Move to proper logging framework
+
+3. **Unify Room Type Mappings**
+   - Create explicit conversion between frontend/backend indices
+   - Or refactor to use consistent mapping
+
+4. **Add Unit Tests**
+   - Test calculate_room_match_percentage edge cases
+   - Test AutoAdjustGraph node placement
+   - Test exact match vs "at least" logic
+
+5. **User Documentation**
+   - Add help tooltips in UI
+   - Explain match percentage calculation
+   - Document Auto-Adjust button behavior
+
+---
+
+## Session Context
+
+**Date**: December 23, 2025
+**Duration**: ~2 hours
+**Files Modified**: 3 (views.py, urls.py, dealselect.js)
+**Lines Changed**: ~150 lines
+**Bugs Fixed**: 6 major issues
+**Features Enhanced**: 2 improvements
+
+**Key Achievement**: Fixed critical workflow bugs and clarified the Transfer → Auto-Adjust pattern, resolving room type mapping issues that were causing incorrect filtering and match percentages.

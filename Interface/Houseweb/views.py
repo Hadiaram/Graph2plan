@@ -3,6 +3,7 @@ from django.http import HttpResponse, JsonResponse # type: ignore
 from django.conf import settings # type: ignore
 import json
 import os
+import random
 import model.test as mltest
 import model.utils as mdul
 from model.floorplan import *
@@ -1328,22 +1329,63 @@ def AutoAdjustGraph(request):
     print(f"Rooms to add: {rooms_to_add}")
     print(f"Rooms to remove: {rooms_to_remove}")
 
-    # Calculate average position for placing new nodes
-    if len(newNode) > 0:
-        avg_x = sum([x for _, _, x, _, _ in newNode]) / len(newNode)
-        avg_y = sum([y for _, _, y, _, _ in newNode]) / len(newNode)
-    else:
-        avg_x, avg_y = 128, 128  # Default center position
+    # Get boundary information to place new nodes within bounds
+    # The boundary is stored in the test data
+    hsname = None
+    try:
+        # Try to get hsname from cookie (if available from frontend)
+        hsname = request.COOKIES.get('hsname', None)
+        if hsname:
+            testname = hsname.split('.')[0]
+            test_index = testNameList.index(testname)
+            data = test_data[test_index]
+            boundary = data.boundary
+
+            # Calculate boundary bounds
+            min_x = float(np.min(boundary[:, 0]))
+            max_x = float(np.max(boundary[:, 0]))
+            min_y = float(np.min(boundary[:, 1]))
+            max_y = float(np.max(boundary[:, 1]))
+
+            # Add some padding so nodes don't sit exactly on the boundary
+            padding = 20
+            min_x += padding
+            max_x -= padding
+            min_y += padding
+            max_y -= padding
+
+            print(f"Boundary bounds: x=[{min_x}, {max_x}], y=[{min_y}, {max_y}]")
+        else:
+            # Fallback: use existing nodes to estimate bounds
+            if len(newNode) > 0:
+                min_x = min([x for _, _, x, _, _ in newNode]) - 20
+                max_x = max([x for _, _, x, _, _ in newNode]) + 20
+                min_y = min([y for _, _, y, _, _ in newNode]) - 20
+                max_y = max([y for _, _, y, _, _ in newNode]) + 20
+            else:
+                min_x, max_x = 50, 200
+                min_y, max_y = 50, 200
+    except Exception as e:
+        print(f"Warning: Could not load boundary, using defaults: {e}")
+        # Fallback: use existing nodes or defaults
+        if len(newNode) > 0:
+            min_x = min([x for _, _, x, _, _ in newNode]) - 20
+            max_x = max([x for _, _, x, _, _ in newNode]) + 20
+            min_y = min([y for _, _, y, _, _ in newNode]) - 20
+            max_y = max([y for _, _, y, _, _ in newNode]) + 20
+        else:
+            min_x, max_x = 50, 200
+            min_y, max_y = 50, 200
 
     # Add new rooms
     next_index = max([int(indx) for indx, _, _, _, _ in newNode]) + 1 if len(newNode) > 0 else 0
 
     for room_name in rooms_to_add:
-        # Place new room at average position with slight offset
-        offset = (next_index % 5) * 20  # Spread them out a bit
-        new_x = avg_x + offset
-        new_y = avg_y + offset
+        # Place new room randomly within boundary bounds
+        new_x = random.uniform(min_x, max_x)
+        new_y = random.uniform(min_y, max_y)
         newNode.append([next_index, room_name, new_x, new_y, 1])  # Default scale = 1
+        print(f"Added {room_name} at ({new_x:.1f}, {new_y:.1f})")
         next_index += 1
 
     # Remove excess rooms (remove from the end first)
@@ -1362,28 +1404,9 @@ def AutoAdjustGraph(request):
                 newEdge = [[u, v] for u, v in newEdge if int(u) != removed_index and int(v) != removed_index]
                 removed += 1
 
-    # Recalculate edges: connect new nodes to existing nodes
-    # Simple strategy: connect each new node to its nearest neighbor
-    for new_indx, new_rmname, new_x, new_y, new_scalesize in newNode:
-        # Check if this node has any edges
-        has_edge = any(int(u) == int(new_indx) or int(v) == int(new_indx) for u, v in newEdge)
-
-        if not has_edge and len(newNode) > 1:
-            # Find nearest neighbor
-            min_dist = float('inf')
-            nearest_indx = None
-
-            for indx, rmname, x, y, scalesize in newNode:
-                if int(indx) == int(new_indx):
-                    continue
-                dist = ((new_x - x) ** 2 + (new_y - y) ** 2) ** 0.5
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest_indx = indx
-
-            if nearest_indx is not None:
-                # Add edge to nearest neighbor
-                newEdge.append([new_indx, nearest_indx])
+    # Note: New nodes are added without edges
+    # Edges will be added later through edge prediction model
+    # (Previously we auto-connected to nearest neighbor, but that's been removed)
 
     print(f"Adjusted nodes: {len(newNode)}")
     print(f"Adjusted edges: {len(newEdge)}")

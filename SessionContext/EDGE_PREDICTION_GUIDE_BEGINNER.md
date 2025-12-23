@@ -101,7 +101,7 @@ The GNN learns patterns like:
 
 ### ResPlan Dataset
 
-The ResPlan dataset contains ~75,000 floor plans with:
+The ResPlan dataset contains 17,000 floor plans with:
 
 - **Nodes**: Room types and positions
 - **Edges**: Which rooms are adjacent

@@ -7,7 +7,8 @@
 When you use Auto-Adjust to add missing rooms to your floor plan, the new rooms appear as **isolated nodes** with no connections (edges) to other rooms. You need to predict which rooms should be connected to these new nodes.
 
 **Example**:
-```
+
+```text
 Before Auto-Adjust:
   Kitchen ---- LivingRoom ---- Bedroom
                     |
@@ -22,7 +23,8 @@ After Auto-Adjust (adds missing DiningRoom):
 ```
 
 **Goal**: Predict that DiningRoom should connect to Kitchen and LivingRoom:
-```
+
+```text
 After Edge Prediction:
   Kitchen ---- LivingRoom ---- Bedroom
      |             |
@@ -44,11 +46,13 @@ After Edge Prediction:
 ### What Edges Represent in Floor Plans
 
 In architectural floor plans, an **edge** between two rooms means:
+
 - The rooms are **adjacent** (share a wall or doorway)
 - You can walk directly from one room to the other
 - They're part of the same connected floor plan layout
 
 **Not having edges** means:
+
 - Rooms are disconnected/isolated
 - Can't be used for layout generation
 - Doesn't represent a realistic floor plan
@@ -60,21 +64,25 @@ In architectural floor plans, an **edge** between two rooms means:
 ### Simple Explanation
 
 Imagine you have a social network:
+
 - **Nodes** = People
 - **Edges** = Friendships
 - You want to predict: "Who should be friends with whom?"
 
 A GNN learns patterns like:
+
 - People with similar interests tend to be friends
 - People with mutual friends tend to become friends
 - People in the same location tend to be friends
 
 In our case:
+
 - **Nodes** = Rooms (kitchen, bedroom, bathroom, etc.)
 - **Edges** = Adjacencies (which rooms share walls)
 - We want to predict: "Which rooms should be adjacent?"
 
 The GNN learns patterns like:
+
 - Kitchens are usually adjacent to dining rooms
 - Bathrooms are rarely adjacent to living rooms
 - Bedrooms cluster together
@@ -94,6 +102,7 @@ The GNN learns patterns like:
 ### ResPlan Dataset
 
 The ResPlan dataset contains ~75,000 floor plans with:
+
 - **Nodes**: Room types and positions
 - **Edges**: Which rooms are adjacent
 - **Boundaries**: Outer wall shapes
@@ -101,7 +110,8 @@ The ResPlan dataset contains ~75,000 floor plans with:
 **Location**: `C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\`
 
 **Files**:
-```
+
+```text
 data_train_converted.pkl  - Training floor plans (nodes, edges, boundaries)
 data_train_eNum.pkl       - Edge structures as vectors
 rNum_train.npy            - Room counts as vectors
@@ -111,6 +121,7 @@ trainTF.pkl               - Turn Functions (boundary shapes)
 ### What's Already Loaded in Your Code
 
 In `views.py`, these are already loaded:
+
 ```python
 train_data        # Floor plan objects with .data.box, .data.edge, .data.boundary
 train_data_rNum   # Room count vectors [num_floorplans, 14]
@@ -125,6 +136,7 @@ trainNameList     # Floor plan IDs
 ### Input Features (What the Model Needs)
 
 For each node in your graph:
+
 1. **Room Type**: Kitchen, Bedroom, Bathroom, etc. (categorical)
 2. **Position**: (x, y) coordinates in the floor plan
 3. **Existing Connections**: Which nodes already have edges
@@ -137,6 +149,7 @@ For the entire graph:
 ### Output (What the Model Predicts)
 
 For each **pair of nodes** (i, j):
+
 - **Probability of edge**: Should room i be connected to room j?
 - Value between 0 (definitely not connected) and 1 (definitely connected)
 
@@ -145,6 +158,7 @@ For each **pair of nodes** (i, j):
 ### Ground Truth (Training Labels)
 
 Use the existing edges from ResPlan dataset:
+
 - **Positive examples**: Pairs of rooms that ARE connected in real floor plans
 - **Negative examples**: Pairs of rooms that are NOT connected
 
@@ -157,6 +171,7 @@ Use the existing edges from ResPlan dataset:
 **Goal**: Load and visualize ResPlan data
 
 **Tasks**:
+
 1. Load a few floor plans from `train_data`
 2. Print the node types (room types)
 3. Print the edges (adjacencies)
@@ -164,6 +179,7 @@ Use the existing edges from ResPlan dataset:
 5. Count how many floor plans have each room type
 
 **Code Starting Point**:
+
 ```python
 import pickle
 train_data = pickle.load(open('static/Data/data_train_converted.pkl', 'rb'))
@@ -177,6 +193,7 @@ print("Edges:", floor_plan.get_triples())
 **Goal**: Convert floor plans into GNN-ready format
 
 **What You Need**:
+
 - **Node features matrix**: [num_nodes, feature_dim]
   - One-hot encode room types (14 types → 14 features)
   - Normalize x, y positions to [0, 1]
@@ -190,11 +207,13 @@ print("Edges:", floor_plan.get_triples())
   - Total pairs = num_nodes × (num_nodes - 1) / 2
 
 **Libraries to Use**:
+
 - PyTorch Geometric (PyG) - makes GNN implementation easy
 - NetworkX - for graph manipulation
 - NumPy - for array operations
 
 **Install**:
+
 ```bash
 pip install torch-geometric networkx
 ```
@@ -204,7 +223,8 @@ pip install torch-geometric networkx
 **Goal**: Create a basic edge prediction model
 
 **Architecture** (start simple):
-```
+
+```text
 Input: Node features [N, feature_dim]
        Edge index [2, E]
 
@@ -229,6 +249,7 @@ Edge Prediction:
 ```
 
 **PyTorch Geometric Example**:
+
 ```python
 import torch
 import torch.nn as nn
@@ -274,6 +295,7 @@ class EdgePredictor(nn.Module):
 **Goal**: Train on ResPlan dataset and evaluate
 
 **Training Loop**:
+
 ```python
 for epoch in range(num_epochs):
     for floor_plan in train_data:
@@ -298,12 +320,14 @@ for epoch in range(num_epochs):
 ```
 
 **Evaluation Metrics**:
+
 - **Accuracy**: % of correct predictions
 - **Precision**: Of predicted edges, how many are correct?
 - **Recall**: Of real edges, how many did we find?
 - **F1 Score**: Balance of precision and recall
 
 **Target Performance**:
+
 - Start: Aim for 70%+ accuracy
 - Good: 80%+ accuracy
 - Excellent: 90%+ accuracy
@@ -313,6 +337,7 @@ for epoch in range(num_epochs):
 **Goal**: Use trained model in AutoAdjustGraph
 
 **Current Code** (`views.py:1407-1409`):
+
 ```python
 # Note: New nodes are added without edges
 # Edges will be added later through edge prediction model
@@ -320,6 +345,7 @@ for epoch in range(num_epochs):
 ```
 
 **Replace with**:
+
 ```python
 # Add edges using edge prediction model
 if len(rooms_to_add) > 0:
@@ -349,6 +375,7 @@ if len(rooms_to_add) > 0:
 ```
 
 **Integration Steps**:
+
 1. Save trained model: `torch.save(model.state_dict(), 'edge_predictor.pth')`
 2. Load in `views.py`: `model.load_state_dict(torch.load('edge_predictor.pth'))`
 3. Add model as global variable in `views.py`
@@ -361,11 +388,13 @@ if len(rooms_to_add) > 0:
 ### What is Convolution?
 
 In images, convolution means:
+
 - Look at a pixel and its neighbors
 - Apply a filter to combine them
 - Move the filter across the image
 
 In graphs, convolution means:
+
 - Look at a node and its neighbors
 - Combine their features
 - Do this for all nodes
@@ -373,7 +402,8 @@ In graphs, convolution means:
 ### Graph Convolution Example
 
 **Initial State**:
-```
+
+```text
 Kitchen (features: [1, 0, 0, 100, 50])  ← room type, x, y
    |
 LivingRoom (features: [0, 1, 0, 150, 75])
@@ -382,7 +412,8 @@ Bedroom (features: [0, 0, 1, 200, 100])
 ```
 
 **After One Convolution Layer**:
-```
+
+```text
 Kitchen:
   - Takes its own features
   - Takes LivingRoom's features (its neighbor)
@@ -396,6 +427,7 @@ LivingRoom:
 ```
 
 **After Multiple Layers**:
+
 - Kitchen knows about LivingRoom's neighbors (Bedroom)
 - Information spreads across entire graph
 - Each node has "context" of the whole floor plan
@@ -407,7 +439,8 @@ LivingRoom:
 ### 1. Message Passing
 
 Nodes send information to neighbors:
-```
+
+```text
 message = W * neighbor_features
 aggregate = sum(all_messages)
 new_features = old_features + aggregate
@@ -416,6 +449,7 @@ new_features = old_features + aggregate
 ### 2. Node Embeddings
 
 A **learned representation** of each node:
+
 - Input: Room type, position (sparse, high-dimensional)
 - Output: Dense vector (e.g., 32 dimensions) capturing room's "essence"
 - Similar rooms get similar embeddings
@@ -423,6 +457,7 @@ A **learned representation** of each node:
 ### 3. Graph Pooling
 
 Combine information from all nodes into one vector:
+
 - Sum pooling: `global_features = sum(all_node_features)`
 - Mean pooling: `global_features = mean(all_node_features)`
 - Max pooling: `global_features = max(all_node_features)`
@@ -431,16 +466,19 @@ Use for predicting graph-level properties (e.g., total floor area)
 
 ### 4. Edge Prediction Strategies
 
-**Option 1: Pairwise Classification**
+#### Option 1: Pairwise Classification
+
 - For each pair (i, j), predict edge independently
 - Fast inference, but ignores dependencies
 
-**Option 2: Autoregressive**
+#### Option 2: Autoregressive
+
 - Predict edges one at a time
 - Each prediction conditions on previous edges
 - Slower but more coherent
 
-**Option 3: Graph-to-Graph**
+#### Option 3: Graph-to-Graph
+
 - Predict entire adjacency matrix at once
 - Ensures global consistency
 - More complex training
@@ -454,11 +492,13 @@ Use for predicting graph-level properties (e.g., total floor area)
 ### Pitfall 1: Class Imbalance
 
 **Problem**: Most node pairs are NOT connected
+
 - Positive examples (edges exist): ~5% of all pairs
 - Negative examples (no edge): ~95% of all pairs
 - Model learns to always predict "no edge"
 
 **Solution**: Balanced sampling
+
 ```python
 num_positive = len(real_edges)
 num_negative = num_positive  # Sample equal number
@@ -470,10 +510,12 @@ training_pairs = positive_edges + negative_edges
 ### Pitfall 2: Over-smoothing
 
 **Problem**: After many GNN layers, all nodes have same features
+
 - Information spreads too much
 - Nodes lose individual identity
 
 **Solution**: Use 2-3 layers max, add skip connections
+
 ```python
 x_residual = x
 x = conv1(x, edge_index)
@@ -483,10 +525,12 @@ x = x + x_residual  # Skip connection
 ### Pitfall 3: Ignoring Spatial Information
 
 **Problem**: GNN only uses graph structure, ignores room positions
+
 - Distant rooms might get connected
 - Violates physical constraints
 
 **Solution**: Add position as features, use spatial attention
+
 ```python
 # Include distance in edge weight
 distances = compute_distances(node_positions)
@@ -499,6 +543,7 @@ x = conv(x, edge_index, edge_weights)
 **Problem**: Testing on floor plans seen during training
 
 **Solution**: Split dataset by floor plans, not by edges
+
 ```python
 train_plans = train_data[:60000]  # First 60k floor plans
 val_plans = train_data[60000:67500]  # Next 7.5k
@@ -546,17 +591,17 @@ test_plans = train_data[67500:]  # Last 7.5k
 ### Tutorials
 
 1. **PyTorch Geometric Tutorial**
-   - https://pytorch-geometric.readthedocs.io/
+   - <https://pytorch-geometric.readthedocs.io/>
    - Start with "Introduction by Example"
    - Do the "Node Classification" tutorial first
 
 2. **Stanford CS224W: Machine Learning with Graphs**
-   - http://web.stanford.edu/class/cs224w/
+   - <http://web.stanford.edu/class/cs224w/>
    - Free lectures on YouTube
    - Covers GNN fundamentals
 
 3. **Distill.pub GNN Article**
-   - https://distill.pub/2021/gnn-intro/
+   - <https://distill.pub/2021/gnn-intro/>
    - Visual, interactive explanations
 
 ### Papers (Beginner-Friendly)
@@ -578,6 +623,7 @@ test_plans = train_data[67500:]  # Last 7.5k
 ## Example: Complete Minimal Pipeline
 
 ### Step 1: Load One Floor Plan
+
 ```python
 import pickle
 import numpy as np
@@ -596,6 +642,7 @@ print(f"Edges: {len(edges)}")
 ```
 
 ### Step 2: Create Node Features
+
 ```python
 # One-hot encode room types
 num_room_types = 14
@@ -616,6 +663,7 @@ print(f"Node features shape: {node_features.shape}")
 ```
 
 ### Step 3: Create Edge Index
+
 ```python
 # Convert to PyTorch Geometric format
 edge_index = []
@@ -629,6 +677,7 @@ print(f"Edge index shape: {edge_index.shape}")
 ```
 
 ### Step 4: Create Labels for All Pairs
+
 ```python
 num_nodes = len(rooms)
 
@@ -652,6 +701,7 @@ print(f"Negative pairs: {len(labels) - sum(labels)}")
 ```
 
 ### Step 5: Train Simple Model
+
 ```python
 import torch
 from torch_geometric.data import Data
@@ -696,7 +746,7 @@ print(f"Predictions shape: {edge_score.shape}")
 ## Timeline Estimate
 
 | Phase | Duration | Effort Level |
-|-------|----------|-------------|
+| ------- | ---------- | ------------- |
 | Data exploration | 1-2 days | Easy |
 | Data preparation | 2-3 days | Medium |
 | Model building | 3-5 days | Medium-Hard |

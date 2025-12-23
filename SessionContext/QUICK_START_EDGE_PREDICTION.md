@@ -13,7 +13,8 @@ This document provides immediate context for implementing edge prediction in a n
 **Base Path**: `C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\`
 
 **Files**:
-```
+
+```text
 data_train_converted.pkl  - 75k floor plans with nodes, edges, boundaries
 data_train_eNum.pkl       - Edge structure vectors [num_floorplans, edge_dim]
 rNum_train.npy            - Room count vectors [num_floorplans, 14]
@@ -25,6 +26,7 @@ trainTF.pkl               - Turn Functions (boundary shapes)
 **Location**: `Houseweb/views.py` (lines 175-190)
 
 **Global Variables**:
+
 ```python
 train_data        # List of floor plan objects
 trainNameList     # List of floor plan IDs (strings)
@@ -42,6 +44,7 @@ train_data_rNum   # Room count vectors [75000, 14]
 ### Floor Plan Object Structure
 
 Each floor plan in `train_data['data']` has:
+
 ```python
 fp.data.box         # [N, 5] - Room bounding boxes [x1, y1, x2, y2, room_type]
 fp.data.edge        # [E, 3] - Edges [src_node, edge_type, dst_node]
@@ -153,7 +156,8 @@ for i, edge in enumerate(edges[:5]):
 ```
 
 **Expected Output**:
-```
+
+```text
 Number of floor plans: ~75000
 First floor plan: rooms array with ~8-12 values
 Room count matrix shape: (75000, 14)
@@ -169,7 +173,8 @@ Edges: list of [src, edge_type, dst] tuples
 **Recommended Path**: `C:\Users\hmbashir\source\Graph2plan\Interface\static\models\`
 
 **Files to Save**:
-```
+
+```text
 edge_predictor.pth          # Model weights
 edge_predictor_config.json  # Hyperparameters (hidden_dim, num_layers, etc.)
 ```
@@ -220,6 +225,7 @@ def load_edge_prediction_model():
 **Format**: `[[index, roomname, x, y, scalesize], ...]`
 
 **Example**:
+
 ```python
 newNode = [
     [0, 'LivingRoom', 64.5, 110, 1],
@@ -232,6 +238,7 @@ newNode = [
 **Edge Format**: `[[u, v], ...]`
 
 **Example**:
+
 ```python
 newEdge = [
     [0, 1],  # LivingRoom <-> Kitchen
@@ -245,7 +252,7 @@ newEdge = [
 
 ## Workflow: Where Edge Prediction Fits
 
-```
+```text
 USER FILTERS
   ↓
 NumSearch/GraphSearch (returns top 20 matches)
@@ -273,7 +280,7 @@ USER CLICKS LAYOUT (generates actual floor plan)
 ### In views.py
 
 | Function | Lines | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `getTrainData()` | 175-190 | Load ResPlan dataset into global variables |
 | `TransGraph()` | 612-664 | Transfer selected floor plan to editing area |
 | `AutoAdjustGraph()` | 1258-1420 | Add/remove nodes based on requirements |
@@ -282,10 +289,10 @@ USER CLICKS LAYOUT (generates actual floor plan)
 
 ### In buttonEvent.js
 
-| Function | Lines | Purpose |
-|----------|-------|---------|
-| `CreateLeftGraph()` | 752-857 | Handle Transfer and Auto-Adjust buttons |
-| `ListBox()` | 179-263 | Display search results with match % |
+| Function             | Lines   | Purpose                                  |
+|----------------------|---------|------------------------------------------|
+| `CreateLeftGraph()`  | 752-857 | Handle Transfer and Auto-Adjust buttons  |
+| `ListBox()`          | 179-263 | Display search results with match %      |
 
 ---
 
@@ -310,11 +317,12 @@ python -c "import torch; import torch_geometric; print('✓ Ready!')"
 ### Django Server
 
 **Start**: Navigate to `C:\Users\hmbashir\source\Graph2plan\Interface\` and run:
+
 ```bash
 python manage.py runserver
 ```
 
-**Access**: http://127.0.0.1:8000/
+**Access**: <http://127.0.0.1:8000/>
 
 ---
 
@@ -357,6 +365,7 @@ python manage.py runserver
 **Error**: `ModuleNotFoundError: No module named 'edge_prediction'`
 
 **Fix**: Add to `sys.path` in views.py:
+
 ```python
 import sys
 sys.path.append(r'C:\Users\hmbashir\source\Graph2plan')
@@ -367,6 +376,7 @@ sys.path.append(r'C:\Users\hmbashir\source\Graph2plan')
 **Issue**: Edge prediction takes >5 seconds
 
 **Fix**:
+
 1. Use CPU-optimized inference: `model.eval()` and `torch.no_grad()`
 2. Batch predictions for multiple new nodes
 3. Consider model quantization
@@ -401,7 +411,7 @@ sys.path.append(r'C:\Users\hmbashir\source\Graph2plan')
 
 ## File Paths Summary
 
-```
+```text
 Code:
   C:\Users\hmbashir\source\Graph2plan\Interface\Houseweb\views.py
   C:\Users\hmbashir\source\Graph2plan\Interface\static\js\buttonEvent.js

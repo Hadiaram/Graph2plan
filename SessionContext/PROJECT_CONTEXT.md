@@ -43,6 +43,7 @@
 ### Key Achievement
 
 ✅ **Successfully integrated ResPlan without modifying Graph2plan's core algorithms**
+
 - Converted ResPlan → Graph2plan's expected format
 - Fixed all type conversion issues
 - Fixed Interface rendering issues
@@ -59,7 +60,7 @@
 
 ### Architecture
 
-```
+```image
 ┌─────────────────────────────────────────────────────────┐
 │                    Graph2plan System                     │
 ├─────────────────────────────────────────────────────────┤
@@ -107,6 +108,7 @@
 ### Data Format Expected
 
 Graph2plan expects:
+
 ```python
 {
     'name': str,              # Floor plan ID
@@ -126,13 +128,13 @@ Graph2plan expects:
 
 ## What is ResPlan?
 
-### Overview
+### Overview of ResPlan
 
 **ResPlan** is a large-scale residential floor plan dataset with **16,996 real-world apartments** from Dubai, featuring detailed architectural information.
 
 ### Dataset Structure
 
-```
+```text
 ResPlan_Dataset/
 ├── cleaned_resplan.pkl              # Main dataset (16,996 plans)
 ├── plans_split/
@@ -146,6 +148,7 @@ ResPlan_Dataset/
 ### Data Format
 
 Each ResPlan floor plan contains:
+
 ```python
 {
     'id': int,                    # Unique floor plan ID (e.g., 14433)
@@ -170,7 +173,7 @@ Each ResPlan floor plan contains:
 ### Key Differences from RPLAN
 
 | Aspect | RPLAN | ResPlan |
-|--------|-------|---------|
+| -------- | ------ | --------- |
 | **Size** | 60,000+ plans | 16,996 plans |
 | **Source** | Chinese residences | Dubai residences |
 | **Format** | MAT files | PKL files (NetworkX + Shapely) |
@@ -203,12 +206,12 @@ Each ResPlan floor plan contains:
 
 ### Secondary Goals ✅ ACHIEVED
 
-4. ✅ **Fix Interface rendering issues**
+1. ✅ **Fix Interface rendering issues**
    - Room boundaries not showing → Fixed `data_js["indoor"]` population
    - Type conversion errors → Added `.astype(int)` where needed
    - Missing floor plan names → Added fallback handling
 
-5. ✅ **Generate visualization images**
+2. ✅ **Generate visualization images**
    - Created `generate_floorplan_images.py` script
    - Generates PNG thumbnails for Interface
 
@@ -221,6 +224,7 @@ Each ResPlan floor plan contains:
 **Created**: `convert_resplan_to_mat.py` (920 lines)
 
 **Functionality**:
+
 - Loads ResPlan PKL files (NetworkX + Shapely)
 - Extracts room graphs and converts to edge lists
 - Computes room bounding boxes from polygon geometries
@@ -230,6 +234,7 @@ Each ResPlan floor plan contains:
 - Saves to MAT format compatible with Graph2plan
 
 **Room Type Mapping**:
+
 ```python
 RESPLAN_TO_GRAPH2PLAN = {
     'living': 0,    # LivingRoom
@@ -249,12 +254,14 @@ RESPLAN_TO_GRAPH2PLAN = {
 **Created**: `create_train_test_split.py`
 
 **Functionality**:
+
 - Loads MAT file
 - Randomly shuffles floor plans
 - Splits 85% train / 15% test
 - Writes ID lists to `train.txt` and `test.txt`
 
 **Output**:
+
 - `train.txt`: 14,445 floor plan IDs
 - `test.txt`: 2,549 floor plan IDs
 
@@ -288,6 +295,7 @@ RESPLAN_TO_GRAPH2PLAN = {
    - File: `4.data_train_eNum.py`
 
 **Scripts Run Successfully**:
+
 ```bash
 python 1.tf_train.py           # ✅ ~20 min
 python 2.data_train_converted.py  # ✅ < 1 min
@@ -297,6 +305,7 @@ python 6.cluster.py            # ✅ 2-60 min (CPU)
 ```
 
 **Generated Files**:
+
 - `trainTF.pkl` / `testTF.pkl` (Turn Functions)
 - `data_train_converted.pkl` / `data_test_converted.pkl`
 - `rNum_train.npy` (Room number statistics)
@@ -306,7 +315,8 @@ python 6.cluster.py            # ✅ 2-60 min (CPU)
 ### Phase 4: Interface Integration ✅
 
 **Files Copied to Interface**:
-```
+
+```text
 Interface/
 ├── retrieval/
 │   ├── tf_train.npy (111 MB)
@@ -320,6 +330,7 @@ Interface/
 ```
 
 **Interface Fix**: `Interface/Houseweb/views.py` (lines 444-463)
+
 - Added population of `data_js["indoor"]` with room boundary polygons
 - Fixed Layout view to show proper room shapes instead of rectangles
 
@@ -328,6 +339,7 @@ Interface/
 **Created**: `generate_floorplan_images.py`
 
 **Functionality**:
+
 - Loads converted PKL files
 - Extracts boundary and room boxes
 - Renders floor plans using matplotlib
@@ -417,6 +429,7 @@ NUM_CATEGORIES = 18  # Graph2plan room types
 ### Critical Data Conversions
 
 1. **Boundary Format**:
+
    ```python
    # ResPlan: MultiPolygon.exterior.coords → (N, 2)
    # Graph2plan: (N, 4) with (x, y, direction, isNew)
@@ -426,6 +439,7 @@ NUM_CATEGORIES = 18  # Graph2plan room types
    ```
 
 2. **Room Type Mapping**:
+
    ```python
    # ResPlan: 'living', 'bedroom', 'bathroom', ...
    # Graph2plan: 0, 1, 3, ... (integer indices)
@@ -433,6 +447,7 @@ NUM_CATEGORIES = 18  # Graph2plan room types
    ```
 
 3. **Edge Extraction**:
+
    ```python
    # ResPlan: NetworkX graph
    # Graph2plan: (E, 2) array of (room1, room2) pairs
@@ -458,7 +473,8 @@ NUM_CATEGORIES = 18  # Graph2plan room types
    - Matches the `name` field in converted PKL
 
 **Example Mapping**:
-```
+
+```text
 plan_00000.pkl (ID: 14433) → train.txt line ??? → ???.png
 plan_XXXXX.pkl (ID: 293)   → train.txt line 1  → 293.png
 ```
@@ -469,7 +485,7 @@ plan_XXXXX.pkl (ID: 293)   → train.txt line 1  → 293.png
 
 ## File Structure
 
-```
+```text
 Graph2plan/
 ├── SessionContext/                       # 📁 NEW: Context for new sessions
 │   └── PROJECT_CONTEXT.md               # ← YOU ARE HERE
@@ -598,6 +614,7 @@ ls Interface/static/Data/Img/*.png | wc -l
 ### 1. No Retraining Required
 
 **Why**: Graph2plan's generation model is **topology-based**, not dataset-specific. It learns to:
+
 - Arrange rooms based on graph structure
 - Respect adjacency constraints
 - Fill arbitrary boundaries
@@ -607,12 +624,14 @@ The model doesn't memorize specific floor plans, so it works with ResPlan out-of
 ### 2. Retrieval vs Generation
 
 **Retrieval Stage** (dataset-dependent):
+
 - Uses Turn Functions to find similar boundaries
 - ResPlan's boundaries are different from RPLAN's
 - Could retrain k-means clustering for better matching
 - **Currently using ResPlan data for retrieval** ✅
 
 **Generation Stage** (dataset-independent):
+
 - Uses pre-trained model from RPLAN
 - Adapts to new boundaries and graphs automatically
 - **No retraining needed** ✅
@@ -622,6 +641,7 @@ The model doesn't memorize specific floor plans, so it works with ResPlan out-of
 **What**: A boundary signature for fast similarity search
 
 **How**:
+
 ```python
 # For each boundary point:
 angle = atan2(dy, dx)  # Direction of edge
@@ -730,14 +750,14 @@ distances = np.linalg.norm(tf_vector - all_tf_vectors, axis=1)
 
 ### Context Documentation (SessionContext/)
 
-6. **PROJECT_CONTEXT.md** (this file!)
+1. **PROJECT_CONTEXT.md** (this file!)
    - **Use When**: Starting a new session without context
    - **Contains**: High-level overview, complete project history
    - **Audience**: New sessions, onboarding
 
 ### Original Graph2plan Documentation
 
-7. **DataPreparation/README.md**
+1. **DataPreparation/README.md**
    - Original Graph2plan data format specification
    - Field descriptions
    - RPLAN dataset structure
@@ -749,19 +769,23 @@ distances = np.linalg.norm(tf_vector - all_tf_vectors, axis=1)
 ### Immediate Next Steps (Optional)
 
 1. **Finish Image Generation** (in progress)
+
    ```bash
    cd DataPreparation
    g2p-env\Scripts\python.exe generate_floorplan_images.py
    ```
+
    - Currently: ~11,000/16,996 generated
    - Time: ~1-2 hours remaining
    - Can interrupt and resume
 
 2. **Verify Boundary Integrity**
+
    ```bash
    cd DataPreparation
    g2p-env\Scripts\python.exe check_boundary_integrity.py
    ```
+
    - Checks if rooms extend beyond boundaries
    - Likely no issues, but good to verify
 
@@ -862,6 +886,7 @@ source g2p-env/bin/activate
 ## Contact & Support
 
 For questions about:
+
 - **Graph2plan**: See original repo (link in main README)
 - **ResPlan**: See ResPlan paper/dataset documentation
 - **This integration**: Review documentation in `DataPreparation/`
@@ -885,4 +910,4 @@ For questions about:
 
 ---
 
-*End of Project Context*
+## End of Project Context

@@ -18,17 +18,20 @@ This document focuses on architecture decisions, training strategies, and integr
 ### Task Definition
 
 **Input**:
+
 - Partially observed graph `G = (V_obs ∪ V_new, E_obs)`
 - Node features: `X ∈ ℝ^{|V| × d}` (room type, position)
 - Existing edges: `E_obs ⊆ V_obs × V_obs`
 - Boundary: `B ∈ ℝ^{1000}` (Turn Function representation)
 
 **Output**:
+
 - Edge predictions: `Ê ⊆ V × V` where `V = V_obs ∪ V_new`
 - Specifically need: `E_new = {(u,v) | u ∈ V_new ∨ v ∈ V_new}`
 
 **Objective**:
-```
+
+```text
 Ê* = argmax_{Ê} P(Ê | G_partial, X, B)
 ```
 
@@ -49,7 +52,8 @@ Assuming your GIN/GINE experience was on standard benchmarks (molecular graphs, 
 ### Option 1: GIN-Based Encoder + Pairwise Decoder
 
 **Architecture**:
-```
+
+```text
 Encoder:
   x^(0) = X (node features)
   for layer ℓ = 1 to L:
@@ -62,11 +66,13 @@ Decoder (for each pair (i,j)):
 ```
 
 **Pros**:
+
 - Permutation invariant
 - Scalable (O(|V|²) for inference)
 - Easy to implement
 
 **Cons**:
+
 - Ignores edge dependencies (predicts independently)
 - No constraint enforcement (might predict crossing edges)
 
@@ -75,7 +81,8 @@ Decoder (for each pair (i,j)):
 ### Option 2: GINE + Variational Graph Auto-Encoder (VGAE)
 
 **Architecture**:
-```
+
+```text
 Encoder (GINE-based):
   for layer ℓ:
     m_ij^(ℓ) = MLP_ℓ([x_i^(ℓ-1) || x_j^(ℓ-1) || e_ij])  # Edge features
@@ -91,11 +98,13 @@ Decoder:
 ```
 
 **Pros**:
+
 - Learns latent graph structure
 - Probabilistic (can sample multiple graphs)
 - Good for uncertainty estimation
 
 **Cons**:
+
 - Inner product decoder is restrictive
 - Training instability (KL collapse)
 - Harder to incorporate spatial constraints
@@ -105,7 +114,8 @@ Decoder:
 ### Option 3: GIN + Attention-Based Edge Selection
 
 **Architecture**:
-```
+
+```text
 Node Encoder (GIN):
   h_i^(L) = GIN_encoder(X, E_obs)
 
@@ -122,11 +132,13 @@ Edge Refinement:
 ```
 
 **Pros**:
+
 - Can enforce degree constraints (top-k)
 - Context-aware (considers effect of adding edge)
 - Interpretable attention weights
 
 **Cons**:
+
 - Sequential (slower inference)
 - Requires careful tuning of k
 
@@ -212,6 +224,7 @@ class SpatialGIN(nn.Module):
 **You have**: 75k floor plans with ground truth adjacency
 
 **Split Strategy**:
+
 ```python
 # Don't split by edges - split by floor plans!
 train_fps = floor_plans[:60000]  # 80%
@@ -240,6 +253,7 @@ def sample_negative_edges(graph, num_nodes, ratio=1.0):
 ```
 
 **Why spatial constraint in negative sampling?**
+
 - Without it: Model learns "if nodes are far, no edge" (trivial)
 - With it: Model must learn architectural semantics (room type relationships)
 
@@ -248,6 +262,7 @@ def sample_negative_edges(graph, num_nodes, ratio=1.0):
 ### Loss Function Design
 
 **Baseline**: Binary Cross-Entropy
+
 ```python
 loss_bce = F.binary_cross_entropy_with_logits(pred, target, pos_weight=pos_weight)
 ```
@@ -275,6 +290,7 @@ def compute_loss(pred_probs, target, edge_index, positions):
 ```
 
 **Planarity Penalty** (simple version):
+
 ```python
 def compute_crossing_penalty(edge_index, positions):
     """Penalize edges that geometrically intersect"""
@@ -300,6 +316,7 @@ def compute_crossing_penalty(edge_index, positions):
 **GIN handles this well** (you know this), but be careful about:
 
 1. **Positional embeddings**: Don't use absolute position encoding
+
 ```python
 # Bad: Learnable positional embeddings
 pos_emb = nn.Embedding(max_nodes, hidden_dim)
@@ -308,13 +325,15 @@ pos_emb = nn.Embedding(max_nodes, hidden_dim)
 spatial_features = compute_relative_positions(positions)
 ```
 
-2. **Global pooling**: Use permutation-invariant aggregation
+1. **Global pooling**: Use permutation-invariant aggregation
+
 ```python
 # Global graph representation
 graph_emb = global_mean_pool(node_emb, batch)
 ```
 
-3. **Batch construction**: Use PyG's DataLoader
+1. **Batch construction**: Use PyG's DataLoader
+
 ```python
 from torch_geometric.loader import DataLoader
 
@@ -389,6 +408,7 @@ dataset = [floorplan_to_pyg(fp, room_label_to_idx) for fp in train_data['data']]
 **Augmentations that preserve graph structure**:
 
 1. **Rotation**: Rotate floor plan by 90°, 180°, 270°
+
 ```python
 def rotate_graph(data, angle):
     theta = angle * np.pi / 180
@@ -400,7 +420,8 @@ def rotate_graph(data, angle):
     return data
 ```
 
-2. **Horizontal/Vertical flip**: Mirror floor plan
+1. **Horizontal/Vertical flip**: Mirror floor plan
+
 ```python
 def flip_graph(data, axis='horizontal'):
     if axis == 'horizontal':
@@ -410,7 +431,8 @@ def flip_graph(data, axis='horizontal'):
     return data
 ```
 
-3. **Node dropout**: Remove random nodes during training
+1. **Node dropout**: Remove random nodes during training
+
 ```python
 def node_dropout(data, p=0.1):
     mask = torch.rand(data.num_nodes) > p
@@ -428,6 +450,7 @@ def node_dropout(data, p=0.1):
 Given your experience, you know accuracy alone isn't enough. Use:
 
 1. **Link Prediction Metrics**:
+
    ```python
    from sklearn.metrics import roc_auc_score, average_precision_score
 
@@ -439,6 +462,7 @@ Given your experience, you know accuracy alone isn't enough. Use:
    ```
 
 2. **Graph-Level Metrics**:
+
    ```python
    # Is predicted graph connected?
    is_connected = torch_geometric.utils.is_undirected(edge_index) and \
@@ -453,6 +477,7 @@ Given your experience, you know accuracy alone isn't enough. Use:
    ```
 
 3. **Architectural Validity** (domain-specific):
+
    ```python
    def architectural_validity(pred_edges, room_types, positions):
        """Check if predicted graph follows architectural rules"""
@@ -487,6 +512,7 @@ Given your experience, you know accuracy alone isn't enough. Use:
 ### Challenge: Incremental Edge Prediction
 
 When AutoAdjustGraph adds N_new nodes:
+
 - Existing graph: G_obs = (V_obs, E_obs)
 - New nodes: V_new (with no edges)
 - Need to predict: E_new = edges involving V_new
@@ -580,12 +606,14 @@ def predict_edges_autoregressive(model, existing_graph, new_nodes, max_edges_per
 ### Where to Add Edge Prediction
 
 **Current code** (`views.py:1407-1409`):
+
 ```python
 # Note: New nodes are added without edges
 # Edges will be added later through edge prediction model
 ```
 
 **Modified**:
+
 ```python
 # Add edges using edge prediction model
 if len(rooms_to_add) > 0:
@@ -619,6 +647,7 @@ if len(rooms_to_add) > 0:
 ### Model Loading
 
 **Option 1**: Load at Django startup
+
 ```python
 # In views.py, at module level
 edge_prediction_model = None
@@ -634,6 +663,7 @@ def load_edge_predictor():
 ```
 
 **Option 2**: Lazy loading (first call)
+
 ```python
 def get_edge_predictor():
     if not hasattr(get_edge_predictor, 'model'):
@@ -646,27 +676,32 @@ def get_edge_predictor():
 ## Comparison: GIN vs GINE for This Task
 
 ### GIN Pros
+
 - ✅ You know it well
 - ✅ Theoretically as powerful as WL test
 - ✅ Fewer parameters (faster training)
 - ✅ Works well for node-level tasks
 
 ### GIN Cons
+
 - ❌ Doesn't use edge features (room relationships)
 - ❌ Limited expressiveness for certain graph structures
 
 ### GINE Pros
+
 - ✅ Can encode edge types (doorway, wall, window)
 - ✅ More expressive for multigraphs
 - ✅ Better for heterogeneous relationships
 
 ### GINE Cons
+
 - ❌ Requires edge features (may not have ground truth)
 - ❌ More parameters (risk of overfitting on 75k samples)
 
 ### Recommendation
 
 **Start with GIN**, add edge features later if needed:
+
 ```python
 # GIN baseline
 model = GIN(input_dim=17, hidden_dim=64, num_layers=3)
@@ -686,6 +721,7 @@ model_enhanced = GINE(input_dim=17, edge_dim=3, hidden_dim=64, num_layers=3)
 ### 1. Graph Attention Networks (GAT)
 
 Add attention to weight neighbor contributions:
+
 ```python
 from torch_geometric.nn import GATConv
 
@@ -710,6 +746,7 @@ class GINWithAttention(nn.Module):
 ### 2. Contrastive Learning
 
 Learn embeddings such that similar floor plans are close in latent space:
+
 ```python
 def contrastive_loss(h1, h2, temperature=0.5):
     """InfoNCE loss for graph pairs"""
@@ -740,6 +777,7 @@ for graph1, graph2 in pairs:  # graph2 is augmented version of graph1
 ### 3. Graph Diffusion Models
 
 Generate edges through iterative denoising:
+
 ```python
 def forward_diffusion(edge_index, t, noise_schedule):
     """Add noise to edge_index at timestep t"""
@@ -765,9 +803,11 @@ def reverse_diffusion(model, noisy_edges, t):
 **Cause**: Class imbalance, model learned to predict negative class
 
 **Solution**:
+
 1. Check positive weight: `pos_weight = neg_count / pos_count`
 2. Balance batch: Equal positive and negative samples
 3. Try focal loss:
+
 ```python
 def focal_loss(pred, target, alpha=0.25, gamma=2.0):
     bce = F.binary_cross_entropy(pred, target, reduction='none')
@@ -783,7 +823,9 @@ def focal_loss(pred, target, alpha=0.25, gamma=2.0):
 **Cause**: Threshold too low, or model biased toward positive class
 
 **Solution**:
+
 1. Tune threshold on validation set:
+
 ```python
 thresholds = np.linspace(0.1, 0.9, 50)
 best_f1 = 0
@@ -797,7 +839,7 @@ for thresh in thresholds:
         best_threshold = thresh
 ```
 
-2. Add degree regularization to loss (see earlier)
+1. Add degree regularization to loss (see earlier)
 
 ---
 
@@ -806,8 +848,10 @@ for thresh in thresholds:
 **Cause**: Model ignores spatial layout
 
 **Solution**:
+
 1. Add planarity penalty to loss
 2. Use spatial features in decoder:
+
 ```python
 # Check if edge would intersect existing edges
 def is_planar(new_edge, existing_edges, positions):
@@ -830,7 +874,9 @@ for candidate in candidates:
 **Cause**: Model doesn't ensure connectivity
 
 **Solution**:
+
 1. Post-processing: Connect isolated nodes to nearest neighbor
+
 ```python
 def connect_isolated_nodes(edge_index, num_nodes, positions):
     degrees = torch_geometric.utils.degree(edge_index[0], num_nodes=num_nodes)
@@ -856,7 +902,7 @@ def connect_isolated_nodes(edge_index, num_nodes, positions):
 ### Expected Results (on ResPlan test set)
 
 | Metric | Random Baseline | Heuristic (Nearest Neighbor) | Simple GNN | Your Target |
-|--------|----------------|------------------------------|------------|-------------|
+| -------- | ---------------- | ------------------------------ | ------------ | ------------- |
 | Accuracy | 50% | 65% | 78% | **85%+** |
 | Precision | 5% | 55% | 82% | **90%+** |
 | Recall | 50% | 60% | 75% | **80%+** |
@@ -866,40 +912,43 @@ def connect_isolated_nodes(edge_index, num_nodes, positions):
 ### Training Time Estimates
 
 | Setup | Time per Epoch | Total Training | GPU |
-|-------|---------------|----------------|-----|
+| ------- | --------------- | ---------------- | ----- |
 | GIN (3 layers, 64 dim) | 5 min | 2-3 hours (30 epochs) | GTX 1080 Ti |
 | GINE (3 layers, 64 dim) | 8 min | 4-5 hours | GTX 1080 Ti |
 | GIN + Attention | 10 min | 5-6 hours | GTX 1080 Ti |
 
-*Based on 60k training graphs, batch size 32*
+## Based on 60k training graphs, batch size 32
 
 ---
 
 ## Next Steps
 
 ### Week 1-2: Implementation
+
 1. ✅ Set up PyTorch Geometric environment
 2. ✅ Convert ResPlan data to PyG format
 3. ✅ Implement GIN baseline
 4. ✅ Train on subset (1000 graphs) for debugging
 
 ### Week 3-4: Experimentation
-5. ✅ Train on full dataset
-6. ✅ Tune hyperparameters (learning rate, hidden dim, num layers)
-7. ✅ Add spatial attention
-8. ✅ Evaluate on test set
+
+1. ✅ Train on full dataset
+2. ✅ Tune hyperparameters (learning rate, hidden dim, num layers)
+3. ✅ Add spatial attention
+4. ✅ Evaluate on test set
 
 ### Week 5: Integration
-9. ✅ Export model to production format
-10. ✅ Integrate with AutoAdjustGraph
-11. ✅ Test end-to-end workflow
-12. ✅ Benchmark inference time
+
+1. ✅ Export model to production format
+2. ✅ Integrate with AutoAdjustGraph
+3. ✅ Test end-to-end workflow
+4. ✅ Benchmark inference time
 
 ---
 
 ## Code Repository Structure (Recommended)
 
-```
+```text
 Graph2plan/
 ├── edge_prediction/
 │   ├── models/
@@ -930,17 +979,20 @@ Graph2plan/
 Your prior work likely covered these, but for completeness:
 
 ### Foundational Papers
+
 1. **GIN**: Xu et al. "How Powerful are Graph Neural Networks?" (ICLR 2019)
 2. **GINE**: Hu et al. "Strategies for Pre-training Graph Neural Networks" (ICLR 2020)
 3. **Link Prediction Survey**: Zhang & Chen "Link Prediction Based on Graph Neural Networks" (NeurIPS 2018)
 
 ### Relevant to This Domain
-4. **Graph2Plan (this paper)**: Hu et al. "Graph2Plan: Learning Floorplan Generation from Layout Graphs" (SIGGRAPH 2020)
-5. **Structured Set Prediction**: Zhang et al. "Neural Graph Matching Networks for Fewshot 3D Action Recognition" (ECCV 2018)
+
+1. **Graph2Plan (this paper)**: Hu et al. "Graph2Plan: Learning Floorplan Generation from Layout Graphs" (SIGGRAPH 2020)
+2. **Structured Set Prediction**: Zhang et al. "Neural Graph Matching Networks for Fewshot 3D Action Recognition" (ECCV 2018)
 
 ### Advanced Techniques
-6. **Spatial GNNs**: Veličković et al. "Neural Execution of Graph Algorithms" (ICLR 2020)
-7. **Graph Diffusion**: Hoogeboom et al. "Equivariant Diffusion for Molecule Generation" (ICML 2022)
+
+1. **Spatial GNNs**: Veličković et al. "Neural Execution of Graph Algorithms" (ICLR 2020)
+2. **Graph Diffusion**: Hoogeboom et al. "Equivariant Diffusion for Molecule Generation" (ICML 2022)
 
 ---
 

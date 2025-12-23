@@ -247,7 +247,7 @@ The Interface workflow:
 ### Discovery 3: ResPlan vs RPLAN Comparison
 
 | Feature | Original RPLAN | Your ResPlan |
-|---------|----------------|--------------|
+| --------- | ---------------- | -------------- |
 | **Total Floor Plans** | 80,000 | 16,996 |
 | **Train Set** | 74,995 (93.75%) | 14,446 (85%) |
 | **Test Set** | 2,880 (3.6%) | 2,550 (15%) |

@@ -8,6 +8,7 @@
 ## Session Overview
 
 This session focused on completing the ResPlan integration by:
+
 1. Fixing Interface display errors after dataset change
 2. Creating image generation script for ResPlan floor plans
 3. Investigating image/boundary mismatches
@@ -108,6 +109,7 @@ boundary = data.boundary
 **Location**: `DataPreparation/generate_floorplan_images.py`
 
 **Root Cause**:
+
 - scipy.io.loadmat with squeeze_me=True squeezed arrays
 - Needed dual access pattern for dict vs object attributes
 - Array shape normalization required
@@ -115,6 +117,7 @@ boundary = data.boundary
 **Solution**: Three key fixes:
 
 **A. Array Shape Handling (lines 125-145)**:
+
 ```python
 # Handle scipy.io.loadmat squeeze_me=True squeezing arrays
 if not isinstance(data, (list, np.ndarray)):
@@ -129,6 +132,7 @@ elif isinstance(data, np.ndarray):
 ```
 
 **B. Dual Access Pattern (lines 147-151)**:
+
 ```python
 def get_attr(obj, key):
     if isinstance(obj, dict):
@@ -138,6 +142,7 @@ def get_attr(obj, key):
 ```
 
 **C. Better Box Data Extraction (lines 163-190)**:
+
 ```python
 box = get_attr(item, 'box')
 if box is not None and len(box) > 0:
@@ -199,12 +204,14 @@ else:
 ## Additional Discovery: Simplified vs Detailed Images
 
 **Why Generated Images Look Different**:
+
 - **ResPlan originals**: Include walls, doors, windows, inner spaces
 - **Our generated images**: Only boundary + room boxes (simplified)
 
 **Reason**: Graph2plan's data format doesn't store architectural details. This is by design, not a bug.
 
 **Options**:
+
 1. Keep simplified images (current) - matches data model
 2. Copy ResPlan originals with ID remapping - better visual quality
 3. Hybrid approach - use originals where available
@@ -224,6 +231,7 @@ else:
 ## Pending Tasks
 
 ### 1. Run Boundary Integrity Check (Optional)
+
 - **Script**: `check_boundary_integrity.py`
 - **Purpose**: Verify room boundaries don't extend beyond outer boundaries
 - **Status**: Script created but not executed due to Python environment path issues
@@ -231,12 +239,14 @@ else:
 - **Expected**: Likely no issues, just naming confusion
 
 ### 2. Complete Image Generation (Optional)
+
 - **Current**: ~11,000/16,996 images generated
 - **Remaining**: ~6,000 images
 - **Script**: `generate_floorplan_images.py` can resume where it left off
 - **Time**: 1-2 hours estimated
 
 ### 3. Decide Image Strategy (Optional)
+
 - Option A: Keep simplified generated images (current - working)
 - Option B: Copy ResPlan originals with ID remapping (better quality)
 - Option C: Hybrid - use originals where available, generate for missing
@@ -246,6 +256,7 @@ else:
 ## Current System State
 
 ### ✅ Working
+
 - Dataset conversion (RPLAN → MAT → Graph2plan PKL)
 - All 6 data preparation scripts
 - Interface with ResPlan data
@@ -255,9 +266,11 @@ else:
 - Image generation script (functional, can generate all images)
 
 ### ⚠️ In Progress
+
 - Image generation: ~11,000/16,996 complete (can continue)
 
 ### 🔧 Optional Enhancements
+
 - Boundary integrity check (likely not needed)
 - Image strategy decision (simplified vs detailed)
 
@@ -266,6 +279,7 @@ else:
 ## Key Technical Patterns
 
 ### Pattern 1: Dual Access for PKL Data
+
 When loading scipy.io.loadmat PKL files, use dual access pattern:
 
 ```python
@@ -280,6 +294,7 @@ boundary = get_attr(item, 'boundary')
 ```
 
 ### Pattern 2: Array Shape Normalization
+
 Handle scipy.io.loadmat squeeze_me=True array squeezing:
 
 ```python
@@ -295,6 +310,7 @@ elif isinstance(data, np.ndarray):
 ```
 
 ### Pattern 3: Type Conversion for NumPy Indexing
+
 Always convert NumPy floats to int for array indexing:
 
 ```python
@@ -306,6 +322,7 @@ mdul.room_label[int(cate)][1]
 ```
 
 ### Pattern 4: Populating Indoor Boundaries
+
 For Layout view to display room shapes:
 
 ```python
@@ -323,6 +340,7 @@ if hasattr(data, 'rBoundary') and data.rBoundary:
 ## Important Reminders
 
 ### Room Type Color Mapping (18 types)
+
 ```python
 ROOM_COLORS = {
     0: '#EE4D4D',  # LivingRoom - Red
@@ -347,13 +365,15 @@ ROOM_COLORS = {
 ```
 
 ### Dataset Numbers
+
 - **Total ResPlan**: 16,996 floor plans
 - **Train set**: 14,446 floor plans (85%)
 - **Test set**: 2,550 floor plans (15%)
 - **Room types**: 18 categories (0-17)
 
 ### Key File Paths
-```
+
+```text
 Interface/static/Data/data_train_converted.pkl  # 14,446 floor plans
 Interface/static/Data/data_test_converted.pkl   # 2,550 floor plans
 Interface/static/Data/Img/                      # Generated PNG thumbnails
@@ -393,12 +413,14 @@ python 6_Apply_Kmeans_Test_Sort.py
 ## Next Steps (If Continuing)
 
 1. **Optional**: Run boundary integrity check
+
    ```bash
    cd DataPreparation
    python check_boundary_integrity.py
    ```
 
 2. **Optional**: Complete image generation
+
    ```bash
    cd DataPreparation
    python generate_floorplan_images.py
@@ -427,6 +449,7 @@ All documentation is in place:
 **Status**: ✅ **SUCCESS - All Critical Issues Resolved**
 
 The Graph2plan Interface is now fully functional with ResPlan dataset:
+
 - All Interface errors fixed
 - Layout view displays proper room boundaries
 - Image generation script working

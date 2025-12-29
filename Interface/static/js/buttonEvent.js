@@ -562,6 +562,69 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
 
 }
 
+function CreateLeftFloorPlan(boxes, exterior, door) {
+    // Clear existing floor plan
+    d3.select('#LeftLayoutSVG').selectAll('rect').remove();
+    d3.select('#LeftLayoutSVG').selectAll('polygon').remove();
+    d3.select('#LeftLayoutSVG').selectAll('line').remove();
+    d3.select('#LeftLayoutSVG').selectAll('clipPath').remove();
+
+    var border = 4;
+    var interiorwall_color = roomcolor("Interior wall");
+
+    // Create clipPath for boundary
+    d3.select("#LeftLayoutSVG").append("clipPath")
+        .attr("id", "left-clip-transferred")
+        .append("polygon")
+        .attr("points", exterior);
+
+    // Draw room rectangles
+    for (var i = 0; i < boxes.length; i++) {
+        var rx = boxes[i][0][0];
+        var ry = boxes[i][0][1];
+        var rw = boxes[i][0][2] - boxes[i][0][0];
+        var rh = boxes[i][0][3] - boxes[i][0][1];
+        var roomType = boxes[i][1][0];
+        var color = roomcolor(roomType);
+
+        var rect = d3.select("#LeftLayoutSVG")
+            .append("rect")
+            .attr("x", rx)
+            .attr("y", ry)
+            .attr("width", rw)
+            .attr("height", rh)
+            .attr("stroke-width", border)
+            .attr("stroke", interiorwall_color)
+            .attr("fill", color)
+            .attr("id", "transferred_" + roomType + "_" + i);
+
+        // Apply clipping (except balconies)
+        if (roomType !== "Balcony") {
+            rect.attr("clip-path", "url(#left-clip-transferred)");
+        }
+    }
+
+    // Draw boundary polygon
+    d3.select("#LeftLayoutSVG")
+        .append("polygon")
+        .attr("points", exterior)
+        .attr("fill", "none")
+        .attr("stroke", roomcolor("Exterior wall"))
+        .attr("stroke-width", border);
+
+    // Draw door
+    var doorCoords = door.split(",");
+    d3.select('#LeftLayoutSVG').append('line')
+        .attr("x1", doorCoords[0])
+        .attr("y1", doorCoords[1])
+        .attr("x2", doorCoords[2])
+        .attr("y2", doorCoords[3])
+        .attr("stroke", roomcolor("Front door"))
+        .attr("stroke-width", border);
+
+    d3.select('#LeftLayoutSVG').attr("transform", "scale(1.5)");
+}
+
 function CreateRightImage(roomID) {
     $.getJSON("/index/LoadTrainHouse/", {'roomID': roomID}, function (ret) {
         //Graph edge
@@ -754,6 +817,13 @@ function CreateLeftGraph(rooms, roomID) {
         //     $.getJSON("/index/TransGraph_net/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
         // Show Auto-Adjust button when graph is transferred
         document.getElementById("AutoAdjust").style.display = "block";
+
+        // Show Floor Plan visualization button
+        document.getElementById("ShowFloorPlan").style.display = "block";
+        document.getElementById("ShowFloorPlan").onclick = function () {
+            console.log("Showing transferred floor plan...");
+            CreateLeftFloorPlan(ret['hsbox'], ret['exterior'], ret['door']);
+        };
 
         document.getElementById("Generate").onclick = function () {
             var AdjustNewGraph = [];

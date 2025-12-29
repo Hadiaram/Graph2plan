@@ -642,6 +642,15 @@ def TransGraph(request):
         node = float(rooms[k]), mdul.room_label[int(rooms[k])][1], center[k][0], center[k][1], float(k)
         data_js["rmpos"].append(node)
 
+    # Add rotated floor plan boxes for visualization
+    data_js["hsbox"] = []
+    for x1, y1, x2, y2, room_type in fp_end.data.box:
+        box_info = [
+            [float(x1), float(y1), float(x2), float(y2)],
+            [mdul.room_label[int(room_type)][1]]
+        ]
+        data_js["hsbox"].append(box_info)
+
     test_index = testNameList.index(testname.split(".")[0])
     data = test_data[test_index]
     ex = ""

@@ -821,8 +821,22 @@ function CreateLeftGraph(rooms, roomID) {
         // Show Floor Plan visualization button
         document.getElementById("ShowFloorPlan").style.display = "block";
         document.getElementById("ShowFloorPlan").onclick = function () {
-            console.log("Showing transferred floor plan...");
-            CreateLeftFloorPlan(ret['hsbox'], ret['exterior'], ret['door']);
+            console.log("Showing current floor plan...");
+
+            // Get current graph state (edited nodes/edges)
+            var currentGraph = GetEditGraph(ret['rmpos']);
+
+            // Send to backend to regenerate floor plan based on current graph
+            $.get("/index/AdjustGraph/", {
+                'NewGraph': JSON.stringify(currentGraph),
+                'userRoomID': rooms.toString().split(',')[0],
+                'adptRoomID': roomID
+            }, function (adjust_ret) {
+                console.log("Floor plan regenerated with current graph state");
+
+                // Use the regenerated boxes from current graph
+                CreateLeftFloorPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret['door']);
+            });
         };
 
         document.getElementById("Generate").onclick = function () {

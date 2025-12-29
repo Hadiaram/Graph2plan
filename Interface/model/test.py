@@ -277,8 +277,9 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
 
     print(' ✅ Generated boxes using dataset averages (no model needed)')
 
-    boxes_pred = boxes_pred * 255
-    
+    # NOTE: boxes_pred is already in 0-255 coordinate space (from fp_end.data.box),
+    # so we DON'T multiply by 255 like the model path does (model outputs 0-1 normalized coords)
+
     fp_end.data.gene = gene_layout
     rBox = boxes_pred[:]
     Box = [[float(x), float(y), float(z), float(k)] for x, y, z, k in rBox]

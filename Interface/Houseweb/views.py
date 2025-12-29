@@ -753,8 +753,8 @@ def AdjustGraph(request):
 
     data_js['roomret'] = []
     for k in range(len(room)):
-        data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
-        data_js['roomret'].append(data)
+        room_data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
+        data_js['roomret'].append(room_data)
 
     # change the box size
     global relbox
@@ -762,12 +762,16 @@ def AdjustGraph(request):
     global reledge
     reledge = data_js["hsedge"]
 
+    # Get boundary from test data (reuse 'data' variable from line 722)
+    # boundary_data is assigned the same test_data[test_index] as 'data'
+    boundary_data = data
+
     ex = ""
-    for i in range(len(data.boundary)):
-        ex = ex + str(data.boundary[i][0]) + "," + str(data.boundary[i][1]) + " "
+    for i in range(len(boundary_data.boundary)):
+        ex = ex + str(boundary_data.boundary[i][0]) + "," + str(boundary_data.boundary[i][1]) + " "
     data_js['exterior'] = ex
-    data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
-        data.boundary[1][0]) + "," + str(data.boundary[1][1])
+    data_js["door"] = str(boundary_data.boundary[0][0]) + "," + str(boundary_data.boundary[0][1]) + "," + str(
+        boundary_data.boundary[1][0]) + "," + str(boundary_data.boundary[1][1])
     area_ = (ymax - ymin) * (xmax - xmin)
     data_js['rmsize'] = []
     for i in range(len(data_js['roomret'])):
@@ -811,16 +815,16 @@ def AdjustGraph(request):
             if isinstance(rb, np.ndarray) and len(rb) > 0:
                 coords_str = " ".join([f"{x},{y}" for x, y in rb])
                 data_js["indoor"].append(coords_str)
-    elif hasattr(data, 'rBoundary') and data.rBoundary:
+    elif hasattr(boundary_data, 'rBoundary') and boundary_data.rBoundary:
         # Fallback to test data rBoundary if generation doesn't have it
-        for rb in data.rBoundary:
+        for rb in boundary_data.rBoundary:
             if isinstance(rb, (np.ndarray, list)) and len(rb) > 0:
                 rb_array = np.array(rb) if not isinstance(rb, np.ndarray) else rb
                 coords_str = " ".join([f"{x},{y}" for x, y in rb_array])
                 data_js["indoor"].append(coords_str)
 
-    boundary = data.boundary
-    
+    boundary = boundary_data.boundary
+
     isNew = boundary[:, 3]
     frontDoor = boundary[[0, 1]]  
     frontDoor = frontDoor[:, [0, 1]]  
@@ -855,7 +859,12 @@ def AdjustGraph(request):
             tmp = [x, y, x, h + y]
             data_js["windowsline"].append(tmp)
     
-    sio.savemat("./static/" + testname.split(',')[0].split('.')[0] + ".mat", {"data": fp_end.data})
+    # Use absolute path for static directory
+    static_dir = os.path.join(settings.BASE_DIR, 'static')
+    os.makedirs(static_dir, exist_ok=True)  # Ensure directory exists
+    mat_filename = testname.split(',')[0].split('.')[0] + ".mat"
+    mat_filepath = os.path.join(static_dir, mat_filename)
+    sio.savemat(mat_filepath, {"data": fp_end.data})
 
     end = time.perf_counter()
     print('AdjustGraph time: %s Seconds' % (end - start))
@@ -1045,7 +1054,13 @@ def Save_Editbox(request):
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]
     fp_end.data = add_dw_fp(fp_end.data)
-    sio.savemat("./static/" + userRoomID + ".mat", {"data": fp_end.data})
+    
+    # Use absolute path for static directory
+    static_dir = os.path.join(settings.BASE_DIR, 'static')
+    os.makedirs(static_dir, exist_ok=True)  # Ensure directory exists
+    mat_filepath = os.path.join(static_dir, userRoomID + ".mat")
+    sio.savemat(mat_filepath, {"data": fp_end.data})
+    
     flag=1
     return HttpResponse(json.dumps(flag), content_type="application/json")
 

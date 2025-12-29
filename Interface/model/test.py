@@ -242,10 +242,19 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
         vw._avg_room_sizes = calculate_average_room_sizes()
         print(f"✅ Calculated averages for {len(vw._avg_room_sizes)} room types")
 
+    # Calculate boundary area to scale rooms appropriately
+    boundary_np = np.array(boundary)
+    x_min, x_max = np.min(boundary_np[:, 0]), np.max(boundary_np[:, 0])
+    y_min, y_max = np.min(boundary_np[:, 1]), np.max(boundary_np[:, 1])
+    boundary_area = (x_max - x_min) * (y_max - y_min)
+
     # Generate boxes based on node positions and average room sizes
     avg_sizes = vw._avg_room_sizes
     boxes_pred = []
+    total_room_area = 0
 
+    # First pass: calculate total area with average sizes
+    room_dims = []
     for i in range(len(fp_end.data.box)):
         room_type_id = int(fp_end.data.box[i][4])
 
@@ -256,15 +265,36 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
             # Fallback to a default size if room type not in training data
             avg_w, avg_h = 40.0, 40.0
 
+        room_dims.append((avg_w, avg_h))
+        total_room_area += avg_w * avg_h
+
+    # Calculate scaling factor to fill ~70% of boundary area
+    target_fill_ratio = 0.90
+    if total_room_area > 0:
+        area_scale = (boundary_area * target_fill_ratio) / total_room_area
+        # Scale dimensions (not area), so take square root
+        dim_scale = np.sqrt(area_scale)
+        print(f"📐 Scaling rooms by {dim_scale:.2f}x to fill {target_fill_ratio*100:.0f}% of boundary")
+    else:
+        dim_scale = 1.0
+
+    # Second pass: create boxes with scaled dimensions
+    for i in range(len(fp_end.data.box)):
+        avg_w, avg_h = room_dims[i]
+
+        # Scale dimensions to better fill the boundary
+        scaled_w = avg_w * dim_scale
+        scaled_h = avg_h * dim_scale
+
         # Get center position from existing box
         x1, y1, x2, y2, _ = fp_end.data.box[i]
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
 
-        # Create box centered at this position with average dimensions
-        new_x1 = cx - avg_w / 2
-        new_y1 = cy - avg_h / 2
-        new_x2 = cx + avg_w / 2
-        new_y2 = cy + avg_h / 2
+        # Create box centered at this position with scaled dimensions
+        new_x1 = cx - scaled_w / 2
+        new_y1 = cy - scaled_h / 2
+        new_x2 = cx + scaled_w / 2
+        new_y2 = cy + scaled_h / 2
 
         boxes_pred.append([new_x1, new_y1, new_x2, new_y2])
 

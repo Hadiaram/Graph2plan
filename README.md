@@ -41,15 +41,19 @@ This implementation requires the following dependencies (tested on Window 10):
   # change the url acchording to your CUDA version, refer to: https://pytorch.org/
   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117 -U
   pip install django opencv-python scipy pandas shapely -U
-  ``` 
-  **Note: there is a fatal error when using Matlab and pytorch<1.5.0 together on Linux. Please install the latest pytorch 1.5.0+ to use the interface and run post processing.**
-		
-* Matlab Python API (Matlab 2019a+ for python 3.7):
-  Find the file "setup.py" in `<PATH_TO_MATLAB>/<VERSION>/extern/engines/python/` and run
-  
   ```
-  python setup.py install
-	```
+
+* **MATLAB Python API (Optional - Recommended for best alignment results)**
+
+  MATLAB is now **completely optional**. The code will work without MATLAB installed, using a Python fallback for room alignment. However, for better room boundary alignment results, you can optionally install MATLAB:
+
+  - **With MATLAB (Recommended):** MATLAB 2019a+ for python 3.7. Find the file "setup.py" in `<PATH_TO_MATLAB>/<VERSION>/extern/engines/python/` and run:
+    ```
+    python setup.py install
+    ```
+    **Note: there is a fatal error when using Matlab and pytorch<1.5.0 together on Linux. Please install the latest pytorch 1.5.0+ to use the interface and run post processing.**
+
+  - **Without MATLAB:** The system will automatically use a Python-based fallback for alignment. You'll see a warning message on startup, but all functionality will work. The alignment quality may be reduced compared to MATLAB.
 
 
 ###  Run
@@ -141,7 +145,7 @@ More details in DataPreparation folder.
 The final output of the network is a raster floorplan image and one bounding box for each room (the refined one). An issue that may occur with the output boxes is that they may not be well-aligned and some boxes may overlap in certain regions. So we need some post processing.
 
 ### Requirements
-The requirements of post processing are the same with the **Interface** part. **Matlab** is required to align room bounding boxes with the floorplan boundary.
+The requirements of post processing are the same with the **Interface** part. **MATLAB is optional** - if available, it will be used to align room bounding boxes with the floorplan boundary for better results. If MATLAB is not installed, a Python-based fallback alignment will be used automatically.
 
 ### Test with network training data
 

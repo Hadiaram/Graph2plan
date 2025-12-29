@@ -176,9 +176,10 @@ function RightInit() {
 
 }
 
-function ListBox(ret, rooms) {
+function ListBox(ret, rooms, metadata) {
     var roomList = ret;
     console.log("roomList" + roomList);
+    console.log("metadata", metadata);
     var hsList = document.getElementById('hsList');
     while (hsList.hasChildNodes()) {
         hsList.removeChild(hsList.firstChild);
@@ -186,7 +187,29 @@ function ListBox(ret, rooms) {
     for (var i = roomList.length - 1; i >= 0; i--) {
         var hs = roomList[i];
         var itembt = document.createElement('button');
-        itembt.innerHTML = ret[i].split(".")[0];
+
+        // Create the main title with floor plan name
+        var titleText = ret[i].split(".")[0];
+
+        // Add match percentage if metadata is available
+        if (metadata && metadata[i]) {
+            var matchInfo = metadata[i];
+            var matchPercent = matchInfo.match;
+            var isFallback = matchInfo.fallback;
+
+            // Create a styled match percentage badge
+            var matchBadge = document.createElement('span');
+            matchBadge.textContent = matchPercent + '%';
+            matchBadge.style.cssText = 'float: right; background-color: ' +
+                (isFallback ? '#FFA500' : '#4CAF50') + // Orange for fallback, green for exact match
+                '; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-left: 5px;';
+
+            itembt.innerHTML = titleText;
+            itembt.appendChild(matchBadge);
+        } else {
+            itembt.innerHTML = titleText;
+        }
+
         itembt.classList.add('api-title');
         itembt.classList.add('pngls');
         itembt.id = "Btn_" + ret[i];
@@ -272,7 +295,10 @@ function NumSearch() {
         rooms.push(room);
     });
     $.get("/index/NumSearch/", {'userInfo': JSON.stringify(rooms)}, function (ret) {
-        ListBox(ret, rooms);
+        // Handle new response format with backward compatibility
+        var floorPlans = ret.floorPlans || ret;  // Use floorPlans if available, otherwise fall back to old format
+        var metadata = ret.metadata || null;  // Get metadata if available
+        ListBox(floorPlans, rooms, metadata);
     });
 }
 
@@ -426,8 +452,8 @@ function LoadTestBoundary(files) {
             .attr("stroke-width", border);
 
     })
-    d3.select('body').select('#LeftBaseSVG').attr("transform", "scale(2)");
-    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(2)");
+    d3.select('body').select('#LeftBaseSVG').attr("transform", "scale(1.5)");
+    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
 
     NumSearch();
 }
@@ -439,40 +465,48 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
     var interior_color = roomcolor("Interior wall");
     var border = 4;
     console.log("CreateLeftPlan", roombx);
+    
+    // Create clipPath first
+    d3.select("#LeftLayoutSVG").append("clipPath")
+        .attr("id", "clip-th")
+        .append("polygon")
+        .attr("points", hsex);
+    
     for (var i = 0; i < roombx.length; i++) {
         var rx = roombx[i][0][0];
         var ry = roombx[i][0][1];
         var rw = roombx[i][0][2] - roombx[i][0][0];
         var rh = roombx[i][0][3] - roombx[i][0][1];
         var color = roomcolor(roombx[i][1][0]);
+        var roomType = roombx[i][1][0];
         var tooltip = d3.select("body").append("div")
             .attr("class", "tooltip") //用于css设置类样式
-            .attr("opacity", 0.0).attr("id", "tooltip" + roombx[i][1][0])
-            .text(roombx[i][1][0]);
-        d3.select("#LeftLayoutSVG").append("rect").attr("x", rx)//每个矩形的起始x坐标
+            .attr("opacity", 0.0).attr("id", "tooltip" + roomType)
+            .text(roomType);
+        
+        var rect = d3.select("#LeftLayoutSVG").append("rect").attr("x", rx)//每个矩形的起始x坐标
             .attr("y", ry)
             .attr("width", rw)
             .attr("height", rh)//每个矩形的高度
             .attr("stroke-width", border)//加边框厚度
             .attr("stroke", interior_color)
             .attr("fill", color)//填充颜色
-            .attr("id", roombx[i][1][0] + "_" + roombx[i][2])
+            .attr("id", roomType + "_" + roombx[i][2])
             .on("mousedown", rect_mousedown)
             .on("mousemove", rect_mousemove)
             .on("mouseup", rect_mouseup)
             .on("click", rect_click)
-            .on("dblclick", rect_dblclick)
-            .append("title")//此处加入title标签
-            .text(roombx[i][1][0]);//title标签的文字
+            .on("dblclick", rect_dblclick);
+        
+        // Only apply clipping to non-balcony rooms
+        if (roomType !== "Balcony") {
+            rect.attr("clip-path", "url(#clip-th)");
+        }
+        
+        rect.append("title")//此处加入title标签
+            .text(roomType);//title标签的文字
 
     }
-    // for (var i = 0; i < indoor.length; i++) {
-    //     d3.select("#LeftLayoutSVG").append("rect").attr("x", indoor[i][0])//每个矩形的起始x坐标
-    //         .attr("y", indoor[i][1])
-    //         .attr("width", indoor[i][2])
-    //         .attr("height", indoor[i][3])//每个矩形的高度
-    //         .attr("fill", roomcolor("Interior door"));//填充颜色
-    // }
 
     d3.select("#LeftLayoutSVG")
         .append("polygon")
@@ -505,10 +539,6 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
 //boudary clip
     //??
     // d3.select("body").select("#LeftCanvas").attr("style", "display:none");
-    d3.select("#LeftLayoutSVG").append("clipPath")
-        .attr("id", "clip-th")
-        .append("polygon")
-        .attr("points", hsex);
     // for (var i = 0; i < windows.length; i++) {
     //
     //     d3.select("#LeftLayoutSVG").append("rect").attr("x", windows[i][0])//每个矩形的起始x坐标
@@ -528,8 +558,7 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
     //          .attr("stroke-width", 1) .attr("class", "windowsline");
     // }
 
-    d3.select('body').select('#LeftLayoutSVG').attr("transform", "scale(2)");
-    d3.select("#LeftLayoutSVG").attr("clip-path", "url(#clip-th)");
+    d3.select('body').select('#LeftLayoutSVG').attr("transform", "scale(1.5)");
 
 }
 
@@ -565,12 +594,20 @@ function CreateRightImage(roomID) {
                 .attr("stroke-width", 2)
                 .attr("id", (i + 1) + "-" + ret['rmpos'][i][1])
         }
-        d3.select('body').select('#RightSVG').attr("transform", "scale(2)");
+        d3.select('body').select('#RightSVG').attr("transform", "scale(1.5)");
 
         var border = 4;
         //Layout room
         var roombx = ret["hsbox"];
         var interiorwall_color = roomcolor("Interior wall");
+
+        // Create clipPath first
+        var hsex = ret["exterior"];
+        d3.select("#RightLayoutSVG").append("clipPath")
+            .attr("id", "Rightclip-th")
+            .append("polygon")
+            .attr("points", hsex);
+
         for (var i = 0; i < roombx.length; i++) {
 
             var rx = roombx[i][0][0];
@@ -578,8 +615,10 @@ function CreateRightImage(roomID) {
             var rw = roombx[i][0][2] - roombx[i][0][0];
             var rh = roombx[i][0][3] - roombx[i][0][1];
             var color = roomcolor(roombx[i][1][0]);
+            var roomType = roombx[i][1][0];
 
-            d3.select("#RightLayoutSVG")
+            // Apply clip-path to all rooms EXCEPT balconies
+            var rect = d3.select("#RightLayoutSVG")
                 .append("rect")
                 .attr("x", rx)//每个矩形的起始x坐标
                 .attr("y", ry)
@@ -588,17 +627,13 @@ function CreateRightImage(roomID) {
                 .attr("stroke-width", 3)//加边框厚度
                 .attr("stroke", interiorwall_color)
                 .attr("fill", color)//填充颜色
-                .attr("id", roombx[i][1][0]);
+                .attr("id", roomType);
+            
+            // Only apply clipping to non-balcony rooms
+            if (roomType !== "Balcony") {
+                rect.attr("clip-path", "url(#Rightclip-th)");
+            }
         }
-
-        var hsex = ret["exterior"];
-
-        //clip over boundary
-        d3.select("#RightLayoutSVG").append("clipPath")
-            .attr("id", "Rightclip-th")
-            .append("polygon")
-            .attr("points", hsex);
-        d3.select("#RightLayoutSVG").attr("clip-path", "url(#Rightclip-th)");
         //Layout Boundary
         d3.select("#RightLayoutSVG")
             .append("polygon")
@@ -618,7 +653,7 @@ function CreateRightImage(roomID) {
             .attr("stroke", fontdoor_color)
             .attr("stroke-width", 6);
     });
-    d3.select('body').select('#RightLayoutSVG').attr("transform", "scale(2)");
+    d3.select('body').select('#RightLayoutSVG').attr("transform", "scale(1.5)");
 
 }
 
@@ -707,13 +742,19 @@ function GraphSearch() {
         'userRoomID': hsname,
         'Numrooms': JSON.stringify(Numrooms),
     }, function (ret) {
-        ListBox(ret, rooms)
+        // Handle new response format with backward compatibility
+        var floorPlans = ret.floorPlans || ret;  // Use floorPlans if available, otherwise fall back to old format
+        var metadata = ret.metadata || null;  // Get metadata if available
+        ListBox(floorPlans, rooms, metadata)
     });
 }
 
 function CreateLeftGraph(rooms, roomID) {
     $.getJSON("/index/TransGraph/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
         //     $.getJSON("/index/TransGraph_net/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
+        // Show Auto-Adjust button when graph is transferred
+        document.getElementById("AutoAdjust").style.display = "block";
+
         document.getElementById("Generate").onclick = function () {
             var AdjustNewGraph = [];
             AdjustNewGraph = GetEditGraph(ret['rmpos']);
@@ -741,6 +782,70 @@ function CreateLeftGraph(rooms, roomID) {
                     }
                     Circlesize.attr("r", adjust_ret['rmsize'][i][0]);
                 }
+            });
+        };
+
+        // Auto-Adjust button handler
+        document.getElementById("AutoAdjust").onclick = function () {
+            console.log("Auto-Adjust clicked!");
+
+            // Get current graph state
+            var currentGraph = GetEditGraph(0);
+
+            // Get user requirements
+            var obj = Num();
+            var Numrooms = [];
+            Numrooms.push(obj.roomactarr);
+            Numrooms.push(obj.roomexaarr);
+            Numrooms.push(obj.roomnumarr);
+
+            console.log("Current graph:", currentGraph);
+            console.log("Room requirements:", Numrooms);
+
+            // Call backend to auto-adjust
+            $.get("/index/AutoAdjustGraph/", {
+                'NewGraph': JSON.stringify(currentGraph),
+                'Numrooms': JSON.stringify(Numrooms)
+            }, function (result) {
+                console.log("Auto-adjust result:", result);
+
+                // Clear existing graph
+                d3.select('body').select('#LeftGraphSVG').selectAll('.TransLine').remove();
+                d3.select('body').select('#LeftGraphSVG').selectAll('.TransCircle').remove();
+
+                // Draw adjusted edges
+                for (var i = 0; i < result.edges.length; i++) {
+                    var u = result.edges[i][0];
+                    var v = result.edges[i][1];
+
+                    // Find node positions
+                    var node_u = result.nodes.find(n => n[0] == u);
+                    var node_v = result.nodes.find(n => n[0] == v);
+
+                    if (node_u && node_v) {
+                        var id = "TransLine_" + u + "_" + v + "_0";
+                        CreateLine(node_u[2], node_u[3], node_v[2], node_v[3], id);
+                    }
+                }
+
+                // Draw adjusted nodes
+                for (var i = 0; i < result.nodes.length; i++) {
+                    var indx = result.nodes[i][0];
+                    var rmname = result.nodes[i][1];
+                    var x = result.nodes[i][2];
+                    var y = result.nodes[i][3];
+                    var scalesize = result.nodes[i][4];
+
+                    var id = "TransCircle_" + indx + "_" + rmname;
+                    CreateCircle(x, y, id, 5);
+                    d3.select("body").select("#LeftGraphSVG").select("#" + id).attr('scalesize', scalesize);
+                }
+
+                // Update room count cookie
+                document.cookie = "RoomNum=" + result.nodes.length;
+
+                console.log("Graph auto-adjusted successfully!");
+                alert("Graph auto-adjusted! Added/removed rooms to match your requirements.");
             });
         };
 
@@ -811,7 +916,7 @@ function CreateLeftGraph(rooms, roomID) {
         });
 
     });
-    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(2)");
+    d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
 
 }
 

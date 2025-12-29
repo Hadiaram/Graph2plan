@@ -15,11 +15,18 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from django.shortcuts import redirect
 
 from Houseweb import views
 
+def root_redirect(request):
+    return redirect('/home')
+
 urlpatterns = [
     # path('admin/', admin.site.urls),
+    # Redirect root to home page
+    path('', root_redirect),
+
     path('index/LoadTestBoundary', views.LoadTestBoundary),
     path('index/NumSearch/', views.NumSearch),
     path(r'index/LoadTrainHouse/', views.LoadTrainHouse),
@@ -27,6 +34,7 @@ urlpatterns = [
     path(r'index/TransGraph_net/', views.TransGraph_net),
     path(r'index/Init/', views.Init),
     path(r'index/AdjustGraph/', views.AdjustGraph),
+    path(r'index/AutoAdjustGraph/', views.AutoAdjustGraph),
     path(r'index/GraphSearch/', views.GraphSearch),
     path(r'index/RelBox/', views.RelBox),
     path(r'index/Save_Editbox/', views.Save_Editbox),

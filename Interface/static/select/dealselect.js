@@ -742,7 +742,12 @@ if(roomvalarr[13]=="0")roomvalarr[13]=0;
     var roomactarr = new Array(14);
     var roomexaarr = new Array(14);
     var roomnumarr = new Array(14);
-roomactarr[0]=1;roomexaarr[0] = 1;roomnumarr[0] = 1;
+    // Initialize all to 0 (removed hardcoded LivingRoom requirement)
+    for (i = 0; i < 14; i++) {
+        roomactarr[i] = 0;
+        roomexaarr[i] = 0;
+        roomnumarr[i] = 0;
+    }
     for (i = 0; i < 14; i++) {
         if (roomvalarr[i] == 0) {
             roomactarr[i] = 0;

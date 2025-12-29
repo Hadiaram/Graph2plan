@@ -9,7 +9,15 @@ import Houseweb.views as vw
 import numpy as np
 import time
 import math
-import matlab.engine
+import warnings
+
+# Try to import MATLAB - make it optional
+HAS_MATLAB = False
+try:
+    import matlab.engine #type: ignore
+    HAS_MATLAB = True
+except ImportError:
+    warnings.warn("MATLAB engine not available in test.py. Using Python fallback.", UserWarning)
   
 
 global adjust,indxlist
@@ -59,7 +67,7 @@ def load_model():
     return model
 
 def get_userinfo(userRoomID,adptRoomID):
-    start = time.clock()
+    start = time.perf_counter()
     global model
     test_index = vw.testNameList.index(userRoomID.split(".")[0])
     test_data = vw.test_data[test_index]
@@ -107,12 +115,12 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
                 temp.append(tmp)
     newbox=[]
     print(adjust)
-    if adjust==True:
+    if adjust==True and vw.boxes_pred is not None:
         oldbox = []
         for i in range(len(vw.boxes_pred)):
             indxtmp=[vw.boxes_pred[i][0],vw.boxes_pred[i][1],vw.boxes_pred[i][2],vw.boxes_pred[i][3],vw.boxes_pred[i][0]]
             oldbox.append(indxtmp)
-    if adjust==False:
+    else:
         indxlist=[]
         oldbox=fp_end.data.box.tolist()
         for i in range(len(oldbox)):
@@ -191,10 +199,11 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     rEdge = fp_end.get_triples(tensor=False)[:, [0, 2, 1]]
     Edge = [[float(u), float(v), float(type2)] for u, v, type2 in rEdge]
 
-    s=time.clock()
+    s=time.perf_counter()
+    vw.loadModel()
     boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end)
 
-    e=time.clock()
+    e=time.perf_counter()
     print(' model test time: %s Seconds' % (e - s))
 
     boxes_pred = boxes_pred * 255
@@ -203,26 +212,34 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     rBox = boxes_pred[:]
     Box = [[float(x), float(y), float(z), float(k)] for x, y, z, k in rBox]
 
-    boundary_mat = matlab.double(boundary)
-    rNode_mat = matlab.double(rNode.tolist())
-    print("rNode.tolist()",rNode.tolist())
-    Edge_mat = matlab.double(Edge)
-    
-    Box_mat=matlab.double(Box)
-    
     fp_end.data.boundary =np.array(boundary)
     fp_end.data.rType =np.array(rNode).astype(int)
     fp_end.data.refineBox=np.array(Box)
     fp_end.data.rEdge=np.array(Edge)
-    gene_mat=matlab.double(np.array(fp_end.data.gene).tolist())
-    startcom= time.clock()
-    box_refine =  vw.engview.align_fp(boundary_mat, Box_mat,  rNode_mat,Edge_mat,matlab.double(fp_end.data.gene.astype(float).copy().tolist()) ,18,False, nargout=3)
-    endcom = time.clock()
-    print(' matlab.compute time: %s Seconds' % (endcom - startcom))
-    box_out=box_refine[0]
-    box_order=box_refine[1]
 
-    rBoundary=box_refine[2]
+    startcom = time.perf_counter()
+    if vw.engview is not None and HAS_MATLAB:
+        # Use MATLAB alignment
+        boundary_mat = matlab.double(boundary)
+        rNode_mat = matlab.double(rNode.tolist())
+        print("rNode.tolist()",rNode.tolist())
+        Edge_mat = matlab.double(Edge)
+        Box_mat = matlab.double(Box)
+        gene_mat = matlab.double(np.array(fp_end.data.gene).tolist())
+
+        box_refine = vw.engview.align_fp(boundary_mat, Box_mat, rNode_mat, Edge_mat,
+                                         matlab.double(fp_end.data.gene.astype(float).copy().tolist()),
+                                         18, False, nargout=3)
+        box_out = box_refine[0]
+        box_order = box_refine[1]
+        rBoundary = box_refine[2]
+    else:
+        # Use Python fallback from views module
+        print("Using Python fallback for alignment")
+        box_out, box_order, rBoundary = vw._python_fallback_align(boundary, Box, rNode.tolist(), Edge, 18)
+
+    endcom = time.perf_counter()
+    print(' alignment compute time: %s Seconds' % (endcom - startcom))
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]

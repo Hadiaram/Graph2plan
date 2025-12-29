@@ -1,7 +1,9 @@
-**1. Data from RPLAN to Graph2Plan**
+# Preparing Dataset
 
-Please refer to https://github.com/zzilch/RPLAN-Toolbox.
-You can also download the extracted data from [here](http://vcc.tech/file/upload_file/Data/G2P/Data.7z).
+## 1. Data from RPLAN to Graph2Plan
+
+Please refer to <https://github.com/zzilch/RPLAN-Toolbox>.
+You can also download the extracted data from [Graph2Plan Data.7z](http://vcc.tech/file/upload_file/Data/G2P/Data.7z).
 You can load the `Network/data/data.mat` in Matlab to chek the data structure.
 
 ![data.mat](../Interface/Img/data.mat.png)
@@ -10,12 +12,13 @@ Data fields:
 
 - name: file name in RPLAN
 - boundary: (x,y,dir,isNew)
-    - first two point indicate the front door.
-    - dir: 0(right)/1(down)/2(left)/3(up) for `dir`. 
-    - `isNew` means the point is not a corner point (usually a point of door)
+  - first two point indicate the front door.
+  - dir: 0(right)/1(down)/2(left)/3(up) for `dir`.
+  - `isNew` means the point is not a corner point (usually a point of door)
 - order: room order, the larger one will cover the smaller one.
 - rType: room categories
-```
+
+```python
 # index,name,type(private/public),floorTexture
 room_label = [
     (0, 'LivingRoom', 1, "PublicArea"),
@@ -38,11 +41,13 @@ room_label = [
     (17, 'InteriorDoor', 0, "InteriorDoor")
 ]
 ```
+
 - rBoundary: (x,y), boundary points for each room
 - gtBox: (y0,x0,y1,x1), min-max bounds of a room [RPLAN]
 - gtBoxNew: (x0,y0,x1,y1), min-max bounds of a room [Graph2Plan]
 - rEdge: (u,v,r), room indices and relative position(u relative to v)
-```
+
+```python
 edge_type = [
     'left-above',
     'left-below',
@@ -57,7 +62,7 @@ edge_type = [
 ]
 ```
 
-**2. Data from Network to GUI**
+## 2. Data from Network to GUI
 
 We provide scripts to create the same data as we provided in Interface. Like DeepLayout, we use 75k for training and about 3k for validation and test.
 Started from the `Network/data/data.mat`:
@@ -68,15 +73,15 @@ Started from the `Network/data/data.mat`:
     - `tf_train.npy`: Sampled turning function with shape (ntrain,1000)
     - `D_test_train.npy`: Truning function distance matrix with shape (ntest,ntrain)
 2. Run `2.data_train_converted.py`. It will create:
-    - `data_train_converted.mat` & `data_train_converted.pkl`: The `.pkl` one Just a copy of the `.mat` re-dumped with pickle. The data have similar structure with `data.mat`. 
+    - `data_train_converted.mat` & `data_train_converted.pkl`: The `.pkl` one Just a copy of the `.mat` re-dumped with pickle. The data have similar structure with `data.mat`.
     - box:(x0,y0,x1,y1,room type)
     ![data_train_converted.mat](../Interface/Img/data_train_converted.png)
 3. Run `3.rNum_train.py`. It wil create:
-    - `rNum_train.npy`: counts of different room type 
+    - `rNum_train.npy`: counts of different room type
 4. Run `4.data_train_eNum.py`. It will create:
     - `data_train_eNum.pkl`: A dict like {'eNum':Array with shape (ntrain,25)}. Each array is reshape from (5,5) which means adjacency matrix of 5 coarse room types.
 5. Run `5.data_test_converted.py`. It will create:
-    - `data_train_converted.mat` & `data_train_converted.pkl`: The `.pkl` one Just a copy of the `.mat` re-dumped with pickle. 
+    - `data_train_converted.mat` & `data_train_converted.pkl`: The `.pkl` one Just a copy of the `.mat` re-dumped with pickle.
     ![data_test_converted.mat](../Interface/Img/data_test_converted.png)
 
     Data fileds:

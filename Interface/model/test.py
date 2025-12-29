@@ -18,18 +18,21 @@ try:
     HAS_MATLAB = True
 except ImportError:
     warnings.warn("MATLAB engine not available in test.py. Using Python fallback.", UserWarning)
-  
+
+# Auto-detect device (GPU if available, otherwise CPU)
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"🖥️  Model will use device: {DEVICE}")
 
 global adjust,indxlist
 adjust=False
 
 def get_data(fp):
     batch = list(fp.get_test_data())
-    batch[0] = batch[0].unsqueeze(0).cuda()
-    batch[1] = batch[1].cuda()
-    batch[2] = batch[2].cuda()
-    batch[3] = batch[3].cuda()
-    batch[4] = batch[4].cuda()
+    batch[0] = batch[0].unsqueeze(0).to(DEVICE)
+    batch[1] = batch[1].to(DEVICE)
+    batch[2] = batch[2].to(DEVICE)
+    batch[3] = batch[3].to(DEVICE)
+    batch[4] = batch[4].to(DEVICE)
     return batch
 
 def test(model,fp):
@@ -58,11 +61,11 @@ def test(model,fp):
         return boxes_pred.squeeze().cpu().numpy(),gene_preds.squeeze().cpu().double().numpy(),boxes_refine.squeeze().cpu().numpy()
 
 def load_model():
-    
+
     model = Model()
-    model.cuda(0)
+    model.to(DEVICE)
     model.load_state_dict(
-        torch.load('./model/model.pth', map_location={'cuda:0': 'cuda:0'}))
+        torch.load('./model/model.pth', map_location=DEVICE))
     model.eval()
     return model
 

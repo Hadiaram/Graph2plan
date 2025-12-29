@@ -826,6 +826,10 @@ function CreateLeftGraph(rooms, roomID) {
             // Get current graph state (edited nodes/edges)
             var currentGraph = GetEditGraph(ret['rmpos']);
 
+            console.log("Current graph to send:", currentGraph);
+            console.log("userRoomID:", rooms.toString().split(',')[0]);
+            console.log("adptRoomID:", roomID);
+
             // Send to backend to regenerate floor plan based on current graph
             $.get("/index/AdjustGraph/", {
                 'NewGraph': JSON.stringify(currentGraph),
@@ -833,9 +837,16 @@ function CreateLeftGraph(rooms, roomID) {
                 'adptRoomID': roomID
             }, function (adjust_ret) {
                 console.log("Floor plan regenerated with current graph state");
+                console.log("Received adjust_ret:", adjust_ret);
 
                 // Use the regenerated boxes from current graph
                 CreateLeftFloorPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret['door']);
+            }).fail(function(xhr, status, error) {
+                console.error("❌ AdjustGraph request failed!");
+                console.error("Status:", status);
+                console.error("Error:", error);
+                console.error("Response:", xhr.responseText);
+                alert("Error regenerating floor plan. Check console for details.");
             });
         };
 

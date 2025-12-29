@@ -666,19 +666,32 @@ def TransGraph(request):
 
 def AdjustGraph(request):
     start = time.perf_counter()
-    # newNode index-typename-cx-cy
-    # oldNode index-typename-cx-cy
-    # newEdge u-v
-    NewGraph = json.loads(request.GET.get("NewGraph"))
-    testname = request.GET.get("userRoomID")
-    trainname = request.GET.get("adptRoomID")
-    s = time.perf_counter()
-    mlresult = mltest.get_userinfo_adjust(testname, trainname, NewGraph)
-    e = time.perf_counter()
-    print('get_userinfo_adjust: %s Seconds' % (e - s))
-    fp_end = mlresult[0]
-    global boxes_pred
-    boxes_pred = mlresult[1]
+    try:
+        # newNode index-typename-cx-cy
+        # oldNode index-typename-cx-cy
+        # newEdge u-v
+        NewGraph = json.loads(request.GET.get("NewGraph"))
+        testname = request.GET.get("userRoomID")
+        trainname = request.GET.get("adptRoomID")
+
+        print(f"🔍 AdjustGraph called:")
+        print(f"   testname: {testname}")
+        print(f"   trainname: {trainname}")
+        print(f"   NewGraph nodes: {len(NewGraph[0]) if NewGraph and len(NewGraph) > 0 else 0}")
+        print(f"   NewGraph edges: {len(NewGraph[1]) if NewGraph and len(NewGraph) > 1 else 0}")
+
+        s = time.perf_counter()
+        mlresult = mltest.get_userinfo_adjust(testname, trainname, NewGraph)
+        e = time.perf_counter()
+        print('get_userinfo_adjust: %s Seconds' % (e - s))
+        fp_end = mlresult[0]
+        global boxes_pred
+        boxes_pred = mlresult[1]
+    except Exception as e:
+        import traceback
+        print(f"❌ ERROR in AdjustGraph: {str(e)}")
+        print(traceback.format_exc())
+        return HttpResponse(json.dumps({"error": str(e)}), content_type="application/json", status=500)
     
     data_js = {}
     data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()

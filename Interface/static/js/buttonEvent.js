@@ -1195,8 +1195,11 @@ function circle_mousemove() {
 
     if (focus_circle) {
         var leftsvg = document.getElementById('LeftGraphSVG');
-        let newX = d3.event.clientX - leftsvg.getBoundingClientRect().left;
-        let newY = d3.event.clientY - leftsvg.getBoundingClientRect().top;
+
+        // Use d3.mouse() to get correct SVG coordinates (handles transforms automatically)
+        var coords = d3.mouse(leftsvg);
+        let newX = coords[0];
+        let newY = coords[1];
 
         // console.log(newX + " " + newY)
 
@@ -1208,15 +1211,15 @@ function circle_mousemove() {
             var tmp_array = (this.id).split("_");
 
             if (tmp_array[1] == pointID) {
-                d3.select(this).attr("x1", newX / 2).attr("y1", newY / 2);
+                d3.select(this).attr("x1", newX).attr("y1", newY);
             }
             if (tmp_array[2] == pointID) {
-                d3.select(this).attr("x2", newX / 2).attr("y2", newY / 2);
+                d3.select(this).attr("x2", newX).attr("y2", newY);
             }
         })
 
         var selectPoint = d3.select("body").select("#LeftGraphSVG").select("#" + this.id)
-            .attr("cx", newX / 2).attr("cy", newY / 2);
+            .attr("cx", newX).attr("cy", newY);
         adjust_graph = true;
         // console.log(adjust_graph, "adjust")
     }
@@ -1290,8 +1293,10 @@ function rect_mousedown() {
     if (focus_rect != "") {
         var leftlaysvg = document.getElementById('LeftLayoutSVG');
 
-        let mousex = (d3.event.clientX - leftlaysvg.getBoundingClientRect().left) / 2;
-        let mousey = (d3.event.clientY - leftlaysvg.getBoundingClientRect().top) / 2;
+        // Use d3.mouse() to get correct SVG coordinates
+        var coords = d3.mouse(leftlaysvg);
+        let mousex = coords[0];
+        let mousey = coords[1];
         var oldx = startRectvalue[0];
         var oldy = startRectvalue[1];
         var oldw = startRectvalue[2];
@@ -1353,8 +1358,11 @@ function rectzoomType(mousex, mousey, oldx, oldy, oldw, oldh) {
 function rect_mousemove() {
 
     var leftlaysvg = document.getElementById('LeftLayoutSVG');
-    let mousex = (d3.event.clientX - leftlaysvg.getBoundingClientRect().left) / 2;
-    let mousey = (d3.event.clientY - leftlaysvg.getBoundingClientRect().top) / 2;
+
+    // Use d3.mouse() to get correct SVG coordinates
+    var coords = d3.mouse(leftlaysvg);
+    let mousex = coords[0];
+    let mousey = coords[1];
         console.log("rect_mousemove",mousex,mousey);
     console.log(focus_rect);
     if (focus_rect == "dblclick") {

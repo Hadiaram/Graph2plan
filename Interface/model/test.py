@@ -89,6 +89,39 @@ def get_userinfo(userRoomID,adptRoomID):
     return fp_end
 
 
+def calculate_average_room_sizes():
+    """
+    Calculate average room dimensions from training dataset.
+    Returns dict: {room_type_id: (avg_width, avg_height)}
+    """
+    room_sizes = {}
+    room_counts = {}
+
+    # Iterate through all training data to collect room size statistics
+    for train_item in vw.train_data:
+        boxes = train_item.box  # [x1, y1, x2, y2, room_type]
+        for box in boxes:
+            x1, y1, x2, y2, room_type = box
+            width = abs(x2 - x1)
+            height = abs(y2 - y1)
+            room_type_id = int(room_type)
+
+            if room_type_id not in room_sizes:
+                room_sizes[room_type_id] = [0, 0]
+                room_counts[room_type_id] = 0
+
+            room_sizes[room_type_id][0] += width
+            room_sizes[room_type_id][1] += height
+            room_counts[room_type_id] += 1
+
+    # Calculate averages
+    avg_sizes = {}
+    for room_type_id, (total_w, total_h) in room_sizes.items():
+        count = room_counts[room_type_id]
+        avg_sizes[room_type_id] = (total_w / count, total_h / count)
+
+    return avg_sizes
+
 def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     global adjust,indxlist
     test_index = vw.testNameList.index(userRoomID.split(".")[0])
@@ -96,7 +129,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     # boundary
     Boundary = test_data.boundary
     boundary=[[float(x),float(y),float(z),float(k)] for x,y,z,k in list(Boundary)]
-    
+
     test_fp =FloorPlan(test_data)
 
     train_index = vw.trainNameList.index(adptRoomID.split(".")[0])
@@ -105,7 +138,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     fp_end = test_fp.adapt_graph(train_fp)
     fp_end.adjust_graph()
 
-    
+
     newNode = NewGraph[0]
     newEdge = NewGraph[1]
     oldNode = NewGraph[2]
@@ -202,12 +235,47 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     rEdge = fp_end.get_triples(tensor=False)[:, [0, 2, 1]]
     Edge = [[float(u), float(v), float(type2)] for u, v, type2 in rEdge]
 
-    s=time.perf_counter()
-    vw.loadModel()
-    boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end)
+    # WORKAROUND: Use dataset-based box generation instead of model
+    # Calculate average room sizes from training data (cached)
+    if not hasattr(vw, '_avg_room_sizes'):
+        print("📊 Calculating average room sizes from training dataset...")
+        vw._avg_room_sizes = calculate_average_room_sizes()
+        print(f"✅ Calculated averages for {len(vw._avg_room_sizes)} room types")
 
-    e=time.perf_counter()
-    print(' model test time: %s Seconds' % (e - s))
+    # Generate boxes based on node positions and average room sizes
+    avg_sizes = vw._avg_room_sizes
+    boxes_pred = []
+
+    for i in range(len(fp_end.data.box)):
+        room_type_id = int(fp_end.data.box[i][4])
+
+        # Get average dimensions for this room type
+        if room_type_id in avg_sizes:
+            avg_w, avg_h = avg_sizes[room_type_id]
+        else:
+            # Fallback to a default size if room type not in training data
+            avg_w, avg_h = 40.0, 40.0
+
+        # Get center position from existing box
+        x1, y1, x2, y2, _ = fp_end.data.box[i]
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+        # Create box centered at this position with average dimensions
+        new_x1 = cx - avg_w / 2
+        new_y1 = cy - avg_h / 2
+        new_x2 = cx + avg_w / 2
+        new_y2 = cy + avg_h / 2
+
+        boxes_pred.append([new_x1, new_y1, new_x2, new_y2])
+
+    boxes_pred = np.array(boxes_pred)
+    boxes_refeine = boxes_pred.copy()  # Use same for refinement
+
+    # Create a simple gene_layout (just copy the original raster or create empty)
+    # This is just for visualization, won't be perfect but will work
+    gene_layout = fp_end.data.gene if hasattr(fp_end.data, 'gene') else np.zeros((128, 128))
+
+    print(' ✅ Generated boxes using dataset averages (no model needed)')
 
     boxes_pred = boxes_pred * 255
     

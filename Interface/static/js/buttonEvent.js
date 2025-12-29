@@ -1195,8 +1195,8 @@ function circle_mousemove() {
 
     if (focus_circle) {
         var leftsvg = document.getElementById('LeftGraphSVG');
-        let newX = d3.event.x - leftsvg.getBoundingClientRect().left;
-        let newY = d3.event.y - leftsvg.getBoundingClientRect().top;
+        let newX = d3.event.clientX - leftsvg.getBoundingClientRect().left;
+        let newY = d3.event.clientY - leftsvg.getBoundingClientRect().top;
 
         // console.log(newX + " " + newY)
 
@@ -1290,8 +1290,8 @@ function rect_mousedown() {
     if (focus_rect != "") {
         var leftlaysvg = document.getElementById('LeftLayoutSVG');
 
-        let mousex = (d3.event.x - leftlaysvg.getBoundingClientRect().left) / 2;
-        let mousey = (d3.event.y - leftlaysvg.getBoundingClientRect().top) / 2;
+        let mousex = (d3.event.clientX - leftlaysvg.getBoundingClientRect().left) / 2;
+        let mousey = (d3.event.clientY - leftlaysvg.getBoundingClientRect().top) / 2;
         var oldx = startRectvalue[0];
         var oldy = startRectvalue[1];
         var oldw = startRectvalue[2];
@@ -1353,8 +1353,8 @@ function rectzoomType(mousex, mousey, oldx, oldy, oldw, oldh) {
 function rect_mousemove() {
 
     var leftlaysvg = document.getElementById('LeftLayoutSVG');
-    let mousex = (d3.event.x - leftlaysvg.getBoundingClientRect().left) / 2;
-    let mousey = (d3.event.y - leftlaysvg.getBoundingClientRect().top) / 2;
+    let mousex = (d3.event.clientX - leftlaysvg.getBoundingClientRect().left) / 2;
+    let mousey = (d3.event.clientY - leftlaysvg.getBoundingClientRect().top) / 2;
         console.log("rect_mousemove",mousex,mousey);
     console.log(focus_rect);
     if (focus_rect == "dblclick") {

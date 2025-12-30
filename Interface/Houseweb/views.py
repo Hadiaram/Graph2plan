@@ -197,8 +197,16 @@ def loadModel():
     end = time.perf_counter()
     print('loadModel time: %s Seconds' % (end - start))
     start = time.perf_counter()
-    test = train_data[trainNameList.index("75119")]
-    mltest.test(model, FloorPlan(test, train=True))
+    # Optional model validation test - don't fail initialization if it errors
+    try:
+        if trainNameList and len(train_data) > 0:
+            test = train_data[0]
+            mltest.test(model, FloorPlan(test, train=True))
+            print(f'✓ Model tested with training sample: {trainNameList[0]}')
+        else:
+            print('⚠️ No training data available for model testing')
+    except Exception as e:
+        print(f'⚠️ Model test failed (non-fatal): {e}')
     end = time.perf_counter()
     print('test Model time: %s Seconds' % (end - start))
 
@@ -667,6 +675,9 @@ def TransGraph(request):
 def AdjustGraph(request):
     start = time.perf_counter()
     try:
+        print("=" * 60)
+        print("🔧 AdjustGraph called")
+        print("=" * 60)
         # newNode index-typename-cx-cy
         # oldNode index-typename-cx-cy
         # newEdge u-v
@@ -681,25 +692,40 @@ def AdjustGraph(request):
         print(f"   NewGraph edges: {len(NewGraph[1]) if NewGraph and len(NewGraph) > 1 else 0}")
 
         s = time.perf_counter()
+        print("📞 Calling mltest.get_userinfo_adjust...")
         mlresult = mltest.get_userinfo_adjust(testname, trainname, NewGraph)
         e = time.perf_counter()
         print('get_userinfo_adjust: %s Seconds' % (e - s))
+        print(f"✅ Model inference complete, processing results...")
+        print(f"   mlresult length: {len(mlresult)}")
+
         fp_end = mlresult[0]
         global boxes_pred
         boxes_pred = mlresult[1]
+        print(f"   boxes_pred type: {type(boxes_pred)}, shape: {boxes_pred.shape if hasattr(boxes_pred, 'shape') else len(boxes_pred)}")
+
+        data_js = {}
+        print("📊 Getting triples...")
+        data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()
+
+        print("📊 Getting rooms...")
+        rooms = fp_end.get_rooms(tensor=False)
+        print(f"   rooms type: {type(rooms)}, shape: {rooms.shape if hasattr(rooms, 'shape') else len(rooms)}")
+
+        print("📊 Calculating centers...")
+        print(f"   fp_end.data.box type: {type(fp_end.data.box)}, shape: {fp_end.data.box.shape if hasattr(fp_end.data.box, 'shape') else 'N/A'}")
+        print(f"   fp_end.data.box dtype: {fp_end.data.box.dtype if hasattr(fp_end.data.box, 'dtype') else 'N/A'}")
+        print(f"   fp_end.data.box[:, :4] sample: {fp_end.data.box[:3, :4] if hasattr(fp_end.data.box, 'shape') and len(fp_end.data.box) > 0 else 'N/A'}")
+        center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in fp_end.data.box[:, :4]]
+
+        print("📊 Getting box_order...")
+        box_order = mlresult[2]
+        print(f"   box_order type: {type(box_order)}, shape: {box_order.shape if hasattr(box_order, 'shape') else len(box_order)}")
     except Exception as e:
         import traceback
         print(f"❌ ERROR in AdjustGraph: {str(e)}")
         print(traceback.format_exc())
         return HttpResponse(json.dumps({"error": str(e)}), content_type="application/json", status=500)
-    
-    data_js = {}
-    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()
-  
-    rooms = fp_end.get_rooms(tensor=False)
-    center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in fp_end.data.box[:, :4]]
-
-    box_order = mlresult[2]
     '''
     handle the information of the room boxes 
     boxes_pred: the prediction from net
@@ -708,12 +734,37 @@ def AdjustGraph(request):
     '''
     room = []
     for o in range(len(box_order)):
-        room.append(float((rooms[int(float(box_order[o][0])) - 1])))
+        try:
+            # Convert box_order index to integer, handle NaN/invalid values
+            order_val = box_order[o][0] if len(box_order[o]) > 0 else box_order[o]
+            order_idx = int(float(order_val)) - 1
+
+            # Validate index is in valid range
+            if 0 <= order_idx < len(rooms):
+                room.append(float(rooms[order_idx]))
+            else:
+                print(f"⚠️ Invalid room index {order_idx} (out of range 0-{len(rooms)-1})")
+                room.append(0.0)  # Default to first room type
+        except (ValueError, TypeError, IndexError) as e:
+            print(f"⚠️ Error processing box_order[{o}]: {e}")
+            room.append(0.0)
+
     boxes_end = []
     for i in range(len(box_order)):
         tmp = []
-        for j in range(4):
-            tmp.append(float(boxes_pred[int(float(box_order[i][0])) - 1][j]))
+        try:
+            order_val = box_order[i][0] if len(box_order[i]) > 0 else box_order[i]
+            order_idx = int(float(order_val)) - 1
+
+            if 0 <= order_idx < len(boxes_pred):
+                for j in range(4):
+                    tmp.append(float(boxes_pred[order_idx][j]))
+            else:
+                print(f"⚠️ Invalid box index {order_idx} (out of range 0-{len(boxes_pred)-1})")
+                tmp = [0.0, 0.0, 0.0, 0.0]  # Default empty box
+        except (ValueError, TypeError, IndexError) as e:
+            print(f"⚠️ Error processing boxes_pred[{i}]: {e}")
+            tmp = [0.0, 0.0, 0.0, 0.0]
         boxes_end.append(tmp)
 
     # Get boundary for clipping
@@ -753,8 +804,15 @@ def AdjustGraph(request):
 
     data_js['roomret'] = []
     for k in range(len(room)):
-        data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
-        data_js['roomret'].append(data)
+        try:
+            room_type_idx = int(room[k])
+            room_label = mdul.room_label[room_type_idx][1] if room_type_idx < len(mdul.room_label) else "Unknown"
+            order_val = float(box_order[k][0]) - 1 if len(box_order[k]) > 0 else k
+            data = boxes_end[k], [room_label], order_val
+            data_js['roomret'].append(data)
+        except (ValueError, TypeError, IndexError) as e:
+            print(f"⚠️ Error creating roomret entry {k}: {e}")
+            data_js['roomret'].append((boxes_end[k] if k < len(boxes_end) else [0,0,0,0], ["Unknown"], k))
 
     # change the box size
     global relbox

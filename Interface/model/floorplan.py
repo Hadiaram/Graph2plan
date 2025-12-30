@@ -38,6 +38,16 @@ class FloorPlan():
         pts = np.concatenate([external, external[:1]]) // 2
         pts_door = door // 2
 
+        # Convert to int32 for OpenCV (required by fillPoly/polylines)
+        pts = pts.astype(np.int32)
+        pts_door = pts_door.astype(np.int32)
+
+        # Safety check: ensure we have valid polygons
+        if len(pts) < 3:
+            raise ValueError(f"Invalid boundary polygon: need at least 3 points, got {len(pts)}")
+        if len(pts_door) < 2:
+            raise ValueError(f"Invalid door line: need at least 2 points, got {len(pts_door)}")
+
         cv2.fillPoly(inside, pts.reshape(1, -1, 2), 1.0)
         cv2.polylines(boundary, pts.reshape(1, -1, 2), True, 1.0, 3)
         cv2.polylines(boundary, pts_door.reshape(1, -1, 2), True, 0.5, 3)
@@ -50,10 +60,14 @@ class FloorPlan():
     def get_inside_box(self, tensor=True):
         external = self.data.boundary[:, :2]
 
-        X, Y = np.linspace(0, 1, 256), np.linspace(0, 1, 256)
         x0, x1 = np.min(external[:, 0]), np.max(external[:, 0])
         y0, y1 = np.min(external[:, 1]), np.max(external[:, 1])
-        box = np.array([[X[x0], Y[y0], X[x1], Y[y1]]])
+
+        # Normalize to 0-1 range (coordinates are in 0-256 range)
+        # Clip to ensure values stay in valid 0-1 range
+        box = np.array([[x0/256, y0/256, x1/256, y1/256]])
+        box = np.clip(box, 0, 1)
+
         if tensor: box = torch.tensor(box).float()
         return box
 

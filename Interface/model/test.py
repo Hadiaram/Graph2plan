@@ -65,7 +65,7 @@ def load_model():
     model = Model()
     model.to(DEVICE)
     model.load_state_dict(
-        torch.load('./model/model.pth', map_location=DEVICE))
+        torch.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\model\model.pth', map_location=DEVICE))
     model.eval()
     return model
 

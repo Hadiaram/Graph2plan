@@ -35,6 +35,10 @@ global boxes_pred, indxlist
 boxes_pred = None
 indxlist = None
 
+# Absolute paths for data directories
+STATIC_DIR = r'C:\Users\hmbashir\source\Graph2plan\Interface\static'
+DATA_DIR = os.path.join(STATIC_DIR, 'Data')
+
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
     """
@@ -159,7 +163,8 @@ def getTestData():
     start = time.perf_counter()
     global test_data, testNameList, trainNameList
  
-    test_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_converted.pkl', 'rb'))
+    test_data_path = os.path.join(DATA_DIR, 'data_test_converted.pkl')
+    test_data = pickle.load(open(test_data_path, 'rb'))
     # Strip trailing spaces from name lists to match image filenames
     test_data, testNameList, trainNameList = (
         test_data['data'],
@@ -178,13 +183,25 @@ def getTestData():
 def getTrainData():
     start = time.perf_counter()
     global train_data, trainNameList, trainTF, train_data_eNum, train_data_rNum
-    
-    train_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_converted.pkl', 'rb'))
-    train_data, trainNameList, trainTF = train_data['data'], list(train_data['nameList']), list(train_data['trainTF'])
-    
-    train_data_eNum = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_eNum.pkl', 'rb'))
+
+    train_data_path = os.path.join(DATA_DIR, 'data_train_converted.pkl')
+    train_data = pickle.load(open(train_data_path, 'rb'))
+    # Strip trailing spaces from name lists to match image filenames
+    train_data, trainNameList, trainTF = (
+        train_data['data'],
+        [str(n).strip() for n in train_data['nameList']],
+        list(train_data['trainTF'])
+    )
+
+    train_eNum_path = os.path.join(DATA_DIR, 'data_train_eNum.pkl')
+    train_data_eNum = pickle.load(open(train_eNum_path, 'rb'))
     train_data_eNum = train_data_eNum['eNum']
-    train_data_rNum = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\rNum_train.npy')
+
+    train_rNum_path = os.path.join(DATA_DIR, 'rNum_train.npy')
+    train_data_rNum = np.load(train_rNum_path)
+
+    print(f"📊 Loaded {len(train_data)} training floor plans")
+    print(f"📊 trainNameList has {len(trainNameList)} names: {trainNameList[:10]}")
 
     end = time.perf_counter()
     print('getTrainData time: %s Seconds' % (end - start))
@@ -808,8 +825,8 @@ def AdjustGraph(request):
             room_type_idx = int(room[k])
             room_label = mdul.room_label[room_type_idx][1] if room_type_idx < len(mdul.room_label) else "Unknown"
             order_val = float(box_order[k][0]) - 1 if len(box_order[k]) > 0 else k
-            data = boxes_end[k], [room_label], order_val
-            data_js['roomret'].append(data)
+            room_data = boxes_end[k], [room_label], order_val
+            data_js['roomret'].append(room_data)
         except (ValueError, TypeError, IndexError) as e:
             print(f"⚠️ Error creating roomret entry {k}: {e}")
             data_js['roomret'].append((boxes_end[k] if k < len(boxes_end) else [0,0,0,0], ["Unknown"], k))
@@ -913,7 +930,9 @@ def AdjustGraph(request):
             tmp = [x, y, x, h + y]
             data_js["windowsline"].append(tmp)
     
-    sio.savemat("./static/" + testname.split(',')[0].split('.')[0] + ".mat", {"data": fp_end.data})
+    # Save .mat file to static directory with absolute path
+    mat_filename = os.path.join(STATIC_DIR, testname.split(',')[0].split('.')[0] + ".mat")
+    sio.savemat(mat_filename, {"data": fp_end.data})
 
     end = time.perf_counter()
     print('AdjustGraph time: %s Seconds' % (end - start))
@@ -1103,7 +1122,11 @@ def Save_Editbox(request):
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]
     fp_end.data = add_dw_fp(fp_end.data)
-    sio.savemat("./static/" + userRoomID + ".mat", {"data": fp_end.data})
+
+    # Save .mat file to static directory with absolute path
+    mat_filename = os.path.join(STATIC_DIR, userRoomID + ".mat")
+    sio.savemat(mat_filename, {"data": fp_end.data})
+
     flag=1
     return HttpResponse(json.dumps(flag), content_type="application/json")
 

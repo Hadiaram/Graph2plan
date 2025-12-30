@@ -23,6 +23,10 @@ except ImportError:
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"🖥️  Model will use device: {DEVICE}")
 
+# Get absolute path to model file (in same directory as this script)
+MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(MODEL_DIR, 'model.pth')
+
 global adjust,indxlist
 adjust=False
 
@@ -65,23 +69,27 @@ def load_model():
     model = Model()
     model.to(DEVICE)
     model.load_state_dict(
-        torch.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\model\model.pth', map_location=DEVICE))
+        torch.load(MODEL_PATH, map_location=DEVICE))
     model.eval()
     return model
 
 def get_userinfo(userRoomID,adptRoomID):
     start = time.perf_counter()
     global model
-    test_index = vw.testNameList.index(userRoomID.split(".")[0])
+    # Strip whitespace and extension to get clean name for lookup
+    test_name = userRoomID.split(".")[0].strip()
+    test_index = vw.testNameList.index(test_name)
     test_data = vw.test_data[test_index]
 
     # boundary
     Boundary = test_data.boundary
     boundary=[[float(x),float(y),float(z),float(k)] for x,y,z,k in list(Boundary)]
-    
+
     test_fp =FloorPlan(test_data)
 
-    train_index = vw.trainNameList.index(adptRoomID.split(".")[0])
+    # Strip whitespace and extension to get clean name for lookup
+    train_name = adptRoomID.split(".")[0].strip()
+    train_index = vw.trainNameList.index(train_name)
     train_data = vw.train_data[train_index]
     train_fp =FloorPlan(train_data,train=True)
     fp_end = test_fp.adapt_graph(train_fp)
@@ -91,15 +99,19 @@ def get_userinfo(userRoomID,adptRoomID):
 
 def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     global adjust,indxlist
-    test_index = vw.testNameList.index(userRoomID.split(".")[0])
+    # Strip whitespace and extension to get clean name for lookup
+    test_name = userRoomID.split(".")[0].strip()
+    test_index = vw.testNameList.index(test_name)
     test_data = vw.test_data[test_index]
     # boundary
     Boundary = test_data.boundary
     boundary=[[float(x),float(y),float(z),float(k)] for x,y,z,k in list(Boundary)]
-    
+
     test_fp =FloorPlan(test_data)
 
-    train_index = vw.trainNameList.index(adptRoomID.split(".")[0])
+    # Strip whitespace and extension to get clean name for lookup
+    train_name = adptRoomID.split(".")[0].strip()
+    train_index = vw.trainNameList.index(train_name)
     train_data = vw.train_data[train_index]
     train_fp =FloorPlan(train_data,train=True)
     fp_end = test_fp.adapt_graph(train_fp)
@@ -251,7 +263,9 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
 
 def get_userinfo_net(userRoomID,adptRoomID):
     global model
-    test_index = vw.testNameList.index(userRoomID.split(".")[0])
+    # Strip whitespace and extension to get clean name for lookup
+    test_name = userRoomID.split(".")[0].strip()
+    test_index = vw.testNameList.index(test_name)
     test_data = vw.test_data[test_index]
 
     # boundary
@@ -259,7 +273,9 @@ def get_userinfo_net(userRoomID,adptRoomID):
     boundary = [[float(x), float(y), float(z), float(k)] for x, y, z, k in list(Boundary)]
     test_fp = FloorPlan(test_data)
 
-    train_index = vw.trainNameList.index(adptRoomID.split(".")[0])
+    # Strip whitespace and extension to get clean name for lookup
+    train_name = adptRoomID.split(".")[0].strip()
+    train_index = vw.trainNameList.index(train_name)
     train_data = vw.train_data[train_index]
     train_fp = FloorPlan(train_data, train=True)
     fp_end = test_fp.adapt_graph(train_fp)

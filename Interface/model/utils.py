@@ -307,6 +307,8 @@ def point_box_relation(u,vbox):
     return relation
 
 def get_vocab():
+    # NOTE: The trained model was created with only 15 room types (bug in original code)
+    # We keep it at 15 for model compatibility, and map types 15-17 to similar types
     room_label = [(0, 'LivingRoom', 1, "PublicArea"),
               (1, 'MasterRoom', 0, "Bedroom"),
               (2, 'Kitchen', 1, "FunctionArea"),
@@ -369,3 +371,38 @@ def get_vocab():
     return vocab
 
 vocab = get_vocab()
+
+def map_room_type_for_model(room_type):
+    """
+    Map room types 14-17 (not supported by trained model) to similar types 0-14.
+
+    The trained model was created with a vocab bug - it only supports 15 room types (0-14).
+    The actual dataset uses 18 room types (0-17). This function maps unsupported types
+    to semantically similar supported types.
+
+    Mapping:
+    - 0-13: No change (standard room types)
+    - 14 (ExteriorWall) -> 14 (Internal) - keep as-is, close enough
+    - 15 (FrontDoor) -> 10 (Entrance) - both are entry points
+    - 16 (InteriorWall) -> 14 (Internal) - walls
+    - 17 (InteriorDoor) -> 10 (Entrance) - transitions between spaces
+    """
+    if isinstance(room_type, (list, np.ndarray)):
+        # Vectorized mapping for arrays
+        room_type = np.asarray(room_type)
+        mapped = room_type.copy()
+        mapped[room_type == 15] = 10  # FrontDoor -> Entrance
+        mapped[room_type == 16] = 14  # InteriorWall -> Internal
+        mapped[room_type == 17] = 10  # InteriorDoor -> Entrance
+        # 14 (ExteriorWall) stays 14 (Internal)
+        return mapped
+    else:
+        # Scalar mapping
+        if room_type == 15:
+            return 10  # FrontDoor -> Entrance
+        elif room_type == 16:
+            return 14  # InteriorWall -> Internal
+        elif room_type == 17:
+            return 10  # InteriorDoor -> Entrance
+        else:
+            return room_type  # 0-14: no change

@@ -73,6 +73,8 @@ class FloorPlan():
 
     def get_rooms(self, tensor=True):
         rooms = self.data.box[:, -1]
+        # Map room types to model-compatible IDs (handles 15-17 -> 0-14)
+        rooms = map_room_type_for_model(rooms)
         if tensor: rooms = torch.tensor(rooms).long()
         return rooms
 

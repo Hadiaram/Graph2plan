@@ -41,7 +41,7 @@ class Model(nn.Module):
               # refinement_net
               refinement_dims=(1024, 512, 256, 128, 64),
               # box_refine
-              box_refine_arch = "I15,C3-64-2,C3-128-2,C3-256-2",
+              box_refine_arch = None,  # Will be set dynamically based on num_objs
               roi_output_size = (8,8),
               roi_spatial_scale = 1.0/8.0,
               roi_cat_feature = True,
@@ -56,6 +56,14 @@ class Model(nn.Module):
     vocab = get_vocab()
     self.vocab = vocab
     num_objs = len(vocab['object_idx_to_name'])
+    num_preds = len(vocab['pred_idx_to_name'])
+    num_doors = len(vocab['door_idx_to_name'])
+    
+    # Set box_refine_arch dynamically based on num_objs if not provided
+    if box_refine_arch is None:
+        box_refine_arch = f"I{num_objs},C3-64-2,C3-128-2,C3-256-2"
+    
+    self.obj_embeddings = nn.Embedding(num_objs, embedding_dim)
     num_preds = len(vocab['pred_idx_to_name'])
     num_doors = len(vocab['door_idx_to_name'])
     self.obj_embeddings = nn.Embedding(num_objs, embedding_dim)

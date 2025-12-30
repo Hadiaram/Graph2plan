@@ -57,8 +57,8 @@ def parse_args():
     parser.add_argument('--embedding_dim', default=128,type=int)
     # refine
     parser.add_argument('--refinement_dims', default='1024, 512, 256, 128, 64',type=int_tuple)
-    # box refine
-    parser.add_argument('--box_refine_arch', default='I15,C3-64-2,C3-128-2,C3-256-2',type=str)
+    # box refine - now auto-detects num_objs from vocabulary
+    parser.add_argument('--box_refine_arch', default=None,type=str)
     parser.add_argument('--roi_cat_feature',default='1',type=bool_flag)  
     # control
     parser.add_argument('--gt_box', default=0, type=bool_flag)
@@ -168,8 +168,8 @@ def get_scheduler(optimizer,args):
 
 def get_losses(args):
     loss = {}
-    weight = torch.ones(15).cuda()
-    weight[13]=weight[14]=0 # ignore unused category
+    weight = torch.ones(18).cuda()
+    weight[13]=weight[14]=0 # ignore External and ExteriorWall categories (not used in ResPlan)
     if args.gene_layout: 
         loss['gene_ce'] = torch.nn.CrossEntropyLoss(weight=weight)
     loss['box_mse'] = torch.nn.SmoothL1Loss()

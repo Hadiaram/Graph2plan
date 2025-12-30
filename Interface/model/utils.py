@@ -321,7 +321,10 @@ def get_vocab():
               (11, 'Storage', 0, "PublicArea"),
               (12, 'Wall-in', 0, "PublicArea"),
               (13, 'External', 0, "External"),
-              (14, 'Internal', 0, "Internal")]
+              (14, 'ExteriorWall', 0, "External"),
+              (15, 'FrontDoor', 1, "Entrance"),
+              (16, 'InteriorWall', 0, "Internal"),
+              (17, 'InteriorDoor', 0, "Internal")]
     
     predicates = [
         'left-above',

@@ -263,6 +263,14 @@ def main(args):
 
     def update(engine,batch):
         model.train()
+        
+        # Learning rate warmup for first 3 epochs to prevent early divergence
+        epoch = engine.state.epoch
+        if epoch <= 3:
+            warmup_factor = min(1.0, epoch / 3.0)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.learning_rate * warmup_factor
+        
         optimizer.zero_grad()
         
         boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
@@ -294,30 +302,75 @@ def main(args):
             else:
                 if epoch>1:
                     if name=='gene_ce':
+                        # Check for NaN in gene_layout before computing loss
+                        if torch.isnan(gene_layout).any() or torch.isinf(gene_layout).any():
+                            logging.error(f"NaN/Inf detected in gene_layout at epoch {epoch}")
+                            continue
                         l = step_weight[epoch-2 if epoch<=3 else -1]*loss[name](gene_layout,layout)
                     elif name=='mutex':
                         l = 0.1*loss[name](boxes_pred,obj_to_img,objs)
-                        if args.box_refine and args.loss_refine and epoch>2: l+=loss[name](boxes_refine,obj_to_img,objs)
+                        if torch.isnan(l) or torch.isinf(l):
+                            logging.warning(f"NaN/Inf in mutex loss at epoch {epoch}, skipping")
+                            l = None
+                        elif args.box_refine and args.loss_refine and epoch>2: 
+                            l_refine = loss[name](boxes_refine,obj_to_img,objs)
+                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                                l += l_refine
                     elif name=='inside':
                         l = 0.1*loss[name](boxes_pred,inside_box,obj_to_img)
-                        if args.box_refine and args.loss_refine and epoch>2: l+=loss[name](boxes_refine,inside_box,obj_to_img)
+                        if torch.isnan(l) or torch.isinf(l):
+                            logging.warning(f"NaN/Inf in inside loss at epoch {epoch}, skipping")
+                            l = None
+                        elif args.box_refine and args.loss_refine and epoch>2:
+                            l_refine = loss[name](boxes_refine,inside_box,obj_to_img)
+                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                                l += l_refine
                     elif name=='coverage':
                         l = 0.1*loss[name](boxes_pred,inside_coords,obj_to_img)
-                        if args.box_refine and args.loss_refine and epoch>2: l+=loss[name](boxes_refine,inside_coords,obj_to_img)
+                        if torch.isnan(l) or torch.isinf(l):
+                            logging.warning(f"NaN/Inf in coverage loss at epoch {epoch}, skipping")
+                            l = None
+                        elif args.box_refine and args.loss_refine and epoch>2:
+                            l_refine = loss[name](boxes_refine,inside_coords,obj_to_img)
+                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                                l += l_refine
                     elif name=='render':
                         l = loss[name](boxes_pred,boxes)
-                        if args.box_refine and args.loss_refine and epoch>2: l+=loss[name](boxes_refine,boxes)
+                        if torch.isnan(l) or torch.isinf(l):
+                            logging.warning(f"NaN/Inf in render loss at epoch {epoch}, skipping")
+                            l = None
+                        elif args.box_refine and args.loss_refine and epoch>2:
+                            l_refine = loss[name](boxes_refine,boxes)
+                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                                l += l_refine
                 
                 if epoch>2:
                     if name=='box_ref_mse':
                         l = step_weight[epoch-3 if epoch<=4 else -1]*loss[name](boxes_refine,boxes)
+                        if torch.isnan(l) or torch.isinf(l):
+                            logging.warning(f"NaN/Inf in box_ref_mse loss at epoch {epoch}, skipping")
+                            l = None
 
             if l is not None:
-                total_loss+=l
-                loss_items[name]=l.item()
+                # Final safety check before adding to total
+                if torch.isnan(l) or torch.isinf(l):
+                    logging.warning(f"NaN/Inf detected in {name} loss, skipping")
+                else:
+                    total_loss+=l
+                    loss_items[name]=l.item()
         loss_items['total_loss'] = total_loss.item()
 
+        # Check for NaN before backward pass
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+            logging.error(f"NaN or Inf loss detected at epoch {epoch}, batch {engine.state.iteration}. Loss items: {loss_items}")
+            logging.error(f"Skipping this batch to prevent gradient corruption.")
+            return loss_items
+        
         total_loss.backward()
+        
+        # Clip gradients to prevent explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+        
         optimizer.step()
         return loss_items
     
@@ -350,27 +403,62 @@ def main(args):
                     l = loss[name](boxes_pred,boxes)
                 if engine.state.epoch>1:
                     if name=='gene_ce':
-                        l = loss[name](gene_layout,layout)
+                        # Check for NaN in gene_layout before computing loss (validation)
+                        if torch.isnan(gene_layout).any() or torch.isinf(gene_layout).any():
+                            logging.warning(f"NaN/Inf detected in gene_layout during validation at epoch {engine.state.epoch}")
+                            l = None
+                        else:
+                            l = loss[name](gene_layout,layout)
                     elif name=='mutex':
                         l = 0.1*loss[name](boxes_pred,obj_to_img,objs)
-                        if args.box_refine and args.loss_refine: l+=0.1*loss[name](boxes_refine,obj_to_img,objs)
+                        if torch.isnan(l) or torch.isinf(l):
+                            l = None
+                        elif args.box_refine and args.loss_refine: 
+                            l_add = 0.1*loss[name](boxes_refine,obj_to_img,objs)
+                            if not (torch.isnan(l_add) or torch.isinf(l_add)):
+                                l += l_add
                     elif name=='inside':
                         l = 0.1*loss[name](boxes_pred,inside_box,obj_to_img)
-                        if args.box_refine and args.loss_refine: l+=0.1*loss[name](boxes_refine,inside_box,obj_to_img)
+                        if torch.isnan(l) or torch.isinf(l):
+                            l = None
+                        elif args.box_refine and args.loss_refine:
+                            l_add = 0.1*loss[name](boxes_refine,inside_box,obj_to_img)
+                            if not (torch.isnan(l_add) or torch.isinf(l_add)):
+                                l += l_add
                     elif name=='coverage':
                         l = 0.1*loss[name](boxes_pred,inside_coords,obj_to_img)
-                        if args.box_refine and args.loss_refine: l+=0.1*loss[name](boxes_refine,inside_coords,obj_to_img)
+                        if torch.isnan(l) or torch.isinf(l):
+                            l = None
+                        elif args.box_refine and args.loss_refine:
+                            l_add = 0.1*loss[name](boxes_refine,inside_coords,obj_to_img)
+                            if not (torch.isnan(l_add) or torch.isinf(l_add)):
+                                l += l_add
                     elif name=='render':
                         l = loss[name](boxes_pred,boxes)
-                        if args.box_refine and args.loss_refine: l+=loss[name](boxes_refine,boxes)
+                        if torch.isnan(l) or torch.isinf(l):
+                            l = None
+                        elif args.box_refine and args.loss_refine:
+                            l_add = loss[name](boxes_refine,boxes)
+                            if not (torch.isnan(l_add) or torch.isinf(l_add)):
+                                l += l_add
 
                 if engine.state.epoch>2:
                     if name=='box_ref_mse':
                         l = loss[name](boxes_refine,boxes)
+                        if torch.isnan(l) or torch.isinf(l):
+                            l = None
 
                 if l is not None:
-                    total_loss+=l
-                    loss_items[name]=l.item()
+                    # Safety check before adding (validation)
+                    if not (torch.isnan(l) or torch.isinf(l)):
+                        total_loss+=l
+                        loss_items[name]=l.item()
+            
+            # Final check for total_loss
+            if torch.isnan(total_loss) or torch.isinf(total_loss):
+                logging.warning(f"NaN/Inf total_loss during validation at epoch {engine.state.epoch}, setting to 0")
+                total_loss = torch.tensor(0.0).cuda()
+            
             loss_items['total_loss'] = total_loss.item()
 
             # boxes pred

@@ -460,13 +460,14 @@ def main(args):
         logging.info(f'Valid, Epoch{engine.state.epoch}, Loss: {str(loss)}')
         logging.info(f'Valid, Epoch{engine.state.epoch}, Metrics: {str(metrics)}')
     
-    # Checkpoint
-    epoch_saver = ModelCheckpoint(checkpoints_dir, 'epoch',save_interval=args.save_interval,n_saved=args.n_saved, require_empty=False, create_dir=True)
-    latest_saver = ModelCheckpoint(checkpoints_dir, 'latest',score_function=lambda e:e.state.epoch,n_saved=1, require_empty=False, create_dir=True)
-    loss_saver = ModelCheckpoint(checkpoints_dir, 'loss',score_function=lambda e:-e.state.output['loss']['total_loss'],n_saved=1, require_empty=False, create_dir=True)
+    # Checkpoint - save_interval moved to event handler attachment
+    epoch_saver = ModelCheckpoint(checkpoints_dir, 'epoch', n_saved=args.n_saved, require_empty=False, create_dir=True)
+    latest_saver = ModelCheckpoint(checkpoints_dir, 'latest', score_function=lambda e:e.state.epoch, n_saved=1, require_empty=False, create_dir=True)
+    loss_saver = ModelCheckpoint(checkpoints_dir, 'loss', score_function=lambda e:-e.state.output['loss']['total_loss'], n_saved=1, require_empty=False, create_dir=True)
 
     trainer.add_event_handler(Events.EPOCH_COMPLETED, latest_saver, {'model': model,'opt':optimizer})
-    trainer.add_event_handler(Events.EPOCH_COMPLETED, epoch_saver, {'model': model,'opt':optimizer})
+    # Use Events.EPOCH_COMPLETED(every=N) for save_interval
+    trainer.add_event_handler(Events.EPOCH_COMPLETED(every=args.save_interval), epoch_saver, {'model': model,'opt':optimizer})
     valid_evaluator.add_event_handler(Events.COMPLETED, loss_saver, {'model': model})
 
     if not args.skip_train:

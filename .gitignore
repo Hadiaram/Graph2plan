@@ -29,29 +29,22 @@ Thumbs.db
 
 # Data folders (except Network/data which uses Git LFS)
 # Network/data/ - COMMENTED OUT - tracked with Git LFS
-data/
-datasets/
-DataPreparation/data/
-Interface/static/Data/
-
-# Training outputs and experiments
-experiment/
-*/experiment/
-checkpoints/
-logs/
-output/
+# data/
+# datasets/
+# DataPreparation/data/
+# Interface/static/Data/
 
 # Big binary artifacts (except .mat files in Network/data which use Git LFS)
-*.npy
-*.npz
-*.pkl
+# *.npy
+# *.npz
+# *.pkl
 # *.mat - COMMENTED OUT - .mat in Network/data/ tracked with Git LFS, others ignored
-*.mat
+# *.mat
 # EXCEPTION: Allow Network/data/*.mat (handled by .gitattributes)
-!Network/data/*.mat
-*.pt
-*.pth
-*.onnx
+# !Network/data/*.mat
+# *.pt
+# *.pth
+# *.onnx
 
 # Caches / misc
 __pycache__/

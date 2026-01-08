@@ -11,11 +11,11 @@ import pathlib as path
 import tqdm
 import logging
 
-import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-import torchvision
-from tensorboardX import SummaryWriter
+import torch  # type: ignore
+import torch.nn.functional as F  # type: ignore
+from torch.utils.data import DataLoader  # type: ignore
+import torchvision  # type: ignore
+from tensorboardX import SummaryWriter  # type: ignore
 
 from model.utils import int_tuple, str_tuple, bool_flag
 from model.metrics import iou,MetricAverage,image_acc,image_acc_ignore,binary_image_acc
@@ -25,13 +25,13 @@ from model.loss import *
 from model.box_utils import *
 from model.utils import *
 
-from ignite.contrib.handlers.tensorboard_logger import *
-from ignite.contrib.handlers import *
-from ignite.contrib.metrics import *
-from ignite.metrics.accuracy import _BaseClassification
-from ignite.engine import *
-from ignite.handlers import *
-from ignite.metrics import *
+from ignite.contrib.handlers.tensorboard_logger import *  # type: ignore
+from ignite.contrib.handlers import *  # type: ignore
+from ignite.contrib.metrics import *  # type: ignore
+from ignite.metrics.accuracy import _BaseClassification  # type: ignore
+from ignite.engine import *  # type: ignore
+from ignite.handlers import *  # type: ignore
+from ignite.metrics import *  # type: ignore
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -401,17 +401,17 @@ def main(args):
     print("Create trainer...")
     optimizer.step()
     scheduler.step(0)
-    trainer = Engine(update)
-    valid_evaluator = Engine(inference)
+    trainer = Engine(update)  # type: ignore
+    valid_evaluator = Engine(inference)  # type: ignore
 
     if args.start_epoch is not None:
-        @trainer.on(Events.STARTED)
+        @trainer.on(Events.STARTED)  # type: ignore
         def set_up_state(engine):
             engine.state.epoch = args.start_epoch
 
     total_func = lambda e:(e.state.metrics['box_iou']+(e.state.metrics['gene_acc'] if args.gene_layout else 0)+(e.state.metrics['box_refine_iou'] if args.box_refine else 0))
 
-    @valid_evaluator.on(Events.COMPLETED)
+    @valid_evaluator.on(Events.COMPLETED)  # type: ignore
     def schedual(engine):
         optimizer.step()
         if args.scheduler == 'step':
@@ -419,7 +419,7 @@ def main(args):
         else:
             scheduler.step(total_func(engine))
 
-    @trainer.on(Events.EPOCH_COMPLETED)
+    @trainer.on(Events.EPOCH_COMPLETED)  # type: ignore
     def evaluate(engine):
         valid_evaluator.run(valid_loader)
 
@@ -433,27 +433,27 @@ def main(args):
     metrics = ['img_acc','box_iou','mask_acc']
 
     # TQDM
-    ProgressBar(persist=True).attach(trainer, output_transform=lambda o:{'loss':o['total_loss']}, metric_names='all')
-    ProgressBar(persist=False).attach(valid_evaluator, output_transform=lambda o:{'loss':o['loss']['total_loss']},metric_names='all')
+    ProgressBar(persist=True).attach(trainer, output_transform=lambda o:{'loss':o['total_loss']}, metric_names='all')  # type: ignore
+    ProgressBar(persist=False).attach(valid_evaluator, output_transform=lambda o:{'loss':o['loss']['total_loss']},metric_names='all')  # type: ignore
     
     # Tensorboard 
-    tb_logger = TensorboardLogger(log_dir=log_dir)
+    tb_logger = TensorboardLogger(log_dir=log_dir)  # type: ignore
     tb_logger.attach(trainer,
-                 log_handler=OutputHandler(tag="train",output_transform=lambda o: o,metric_names='all'),
-                 event_name=Events.ITERATION_COMPLETED)
+                 log_handler=OutputHandler(tag="train",output_transform=lambda o: o,metric_names='all'),  # type: ignore
+                 event_name=Events.ITERATION_COMPLETED)  # type: ignore
     tb_logger.attach(trainer,
-                 log_handler=OptimizerParamsHandler(optimizer),
-                 event_name=Events.ITERATION_STARTED)
+                 log_handler=OptimizerParamsHandler(optimizer),  # type: ignore
+                 event_name=Events.ITERATION_STARTED)  # type: ignore
     tb_logger.attach(valid_evaluator,
-                 log_handler=OutputHandler(tag="valid",output_transform=lambda o:o['loss'],metric_names='all', global_step_transform=global_step_from_engine(trainer)),
-                 event_name=Events.EPOCH_COMPLETED)
+                 log_handler=OutputHandler(tag="valid",output_transform=lambda o:o['loss'],metric_names='all', global_step_transform=global_step_from_engine(trainer)),  # type: ignore
+                 event_name=Events.EPOCH_COMPLETED)  # type: ignore
     
     # Logging
-    @trainer.on(Events.EPOCH_COMPLETED)
+    @trainer.on(Events.EPOCH_COMPLETED)  # type: ignore
     def log_results(engine):
         logging.info(f'Train, Epoch{engine.state.epoch}, Loss: {str(engine.state.output)}')
 
-    @valid_evaluator.on(Events.EPOCH_COMPLETED)
+    @valid_evaluator.on(Events.EPOCH_COMPLETED)  # type: ignore
     def log_results(engine):
         loss = engine.state.output['loss']
         metrics = engine.state.metrics
@@ -461,14 +461,14 @@ def main(args):
         logging.info(f'Valid, Epoch{engine.state.epoch}, Metrics: {str(metrics)}')
     
     # Checkpoint - save_interval moved to event handler attachment
-    epoch_saver = ModelCheckpoint(checkpoints_dir, 'epoch', n_saved=args.n_saved, require_empty=False, create_dir=True)
-    latest_saver = ModelCheckpoint(checkpoints_dir, 'latest', score_function=lambda e:e.state.epoch, n_saved=1, require_empty=False, create_dir=True)
-    loss_saver = ModelCheckpoint(checkpoints_dir, 'loss', score_function=lambda e:-e.state.output['loss']['total_loss'], n_saved=1, require_empty=False, create_dir=True)
+    epoch_saver = ModelCheckpoint(checkpoints_dir, 'epoch', n_saved=args.n_saved, require_empty=False, create_dir=True)  # type: ignore
+    latest_saver = ModelCheckpoint(checkpoints_dir, 'latest', score_function=lambda e:e.state.epoch, n_saved=1, require_empty=False, create_dir=True)  # type: ignore
+    loss_saver = ModelCheckpoint(checkpoints_dir, 'loss', score_function=lambda e:-e.state.output['loss']['total_loss'], n_saved=1, require_empty=False, create_dir=True)  # type: ignore
 
-    trainer.add_event_handler(Events.EPOCH_COMPLETED, latest_saver, {'model': model,'opt':optimizer})
+    trainer.add_event_handler(Events.EPOCH_COMPLETED, latest_saver, {'model': model,'opt':optimizer})  # type: ignore
     # Use Events.EPOCH_COMPLETED(every=N) for save_interval
-    trainer.add_event_handler(Events.EPOCH_COMPLETED(every=args.save_interval), epoch_saver, {'model': model,'opt':optimizer})
-    valid_evaluator.add_event_handler(Events.COMPLETED, loss_saver, {'model': model})
+    trainer.add_event_handler(Events.EPOCH_COMPLETED(every=args.save_interval), epoch_saver, {'model': model,'opt':optimizer})  # type: ignore
+    valid_evaluator.add_event_handler(Events.COMPLETED, loss_saver, {'model': model})  # type: ignore
 
     if not args.skip_train:
         trainer.run(train_loader,max_epochs=args.epoch)
@@ -575,7 +575,7 @@ def main(args):
                 'gt':[layout,boxes]
             }                   
     
-    test_evaluator = Engine(test)
+    test_evaluator = Engine(test)  # type: ignore
 
     MetricAverage(output_transform=lambda output:iou(output['pred'][0],output['gt'][1])).attach(test_evaluator,'box_iou')
 
@@ -585,8 +585,8 @@ def main(args):
     if args.box_refine: 
         MetricAverage(output_transform=lambda output:iou(output['pred'][2],output['gt'][1])).attach(test_evaluator,'box_refine_iou')
 
-    ProgressBar(persist=False).attach(test_evaluator)
-    @test_evaluator.on(Events.COMPLETED)
+    ProgressBar(persist=False).attach(test_evaluator)  # type: ignore
+    @test_evaluator.on(Events.COMPLETED)  # type: ignore
     def save_metrics(engine):
         metrics = engine.state.metrics
         with open(f'{output_dir}/output_{start_time}_metrics.json','w') as f:

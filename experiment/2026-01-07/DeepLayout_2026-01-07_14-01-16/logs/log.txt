@@ -1,9 +1,9 @@
-2026-01-07 12:08:13,882 - root - INFO - python train.py --batch_size 100 --epoch 150 --learning_rate 0.00005 --skip_train 1 --pretrain 
-2026-01-07 12:08:13,883 - root - INFO - Namespace(dataset_dir='./data', image_size=(128, 128), input_dim=3, with_house=False, pos_dim=25, area_dim=10, batch_size=100, workers=8, train_shuffle=True, gene_layout=True, box_refine=True, embedding_dim=128, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True, gt_box=0, relative=1, mutex=1, inside=1, coverage=1, render=1, nsample=100, loss_refine=0, render_refine=0, optimizer='Adam', scheduler='plateau', learning_rate=5e-05, decay_rate=0.0001, step_size=10, step_rate=0.5, save_interval=5, n_saved=20, pretrain=None, skip_train=0, seed=74269, epoch=150, start_epoch=None, gpu='0', multi_gpu=None, suffix=None, debug=0, test=0, argv='train.py --batch_size 100 --epoch 150 --learning_rate 0.00005')
-2026-01-07 12:08:13,883 - root - INFO - ---------------------------------------------------TRANING---------------------------------------------------
-2026-01-07 12:08:13,883 - root - INFO - Use seed: 74269
-2026-01-07 12:08:14,784 - root - INFO - Namespace(embedding_dim=128, image_size=(128, 128), input_dim=3, attribute_dim=35, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True)
-2026-01-07 12:08:14,785 - root - INFO - Model(
+2026-01-07 14:01:16,098 - root - INFO - python train.py --batch_size 20 --epoch 50 --learning_rate 0.0001 --skip_train 1 --pretrain 
+2026-01-07 14:01:16,098 - root - INFO - Namespace(dataset_dir='./data', image_size=(128, 128), input_dim=3, with_house=False, pos_dim=25, area_dim=10, batch_size=20, workers=8, train_shuffle=True, gene_layout=True, box_refine=True, embedding_dim=128, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True, gt_box=0, relative=1, mutex=1, inside=1, coverage=1, render=1, nsample=100, loss_refine=0, render_refine=0, optimizer='Adam', scheduler='plateau', learning_rate=0.0001, decay_rate=0.0001, step_size=10, step_rate=0.5, save_interval=5, n_saved=20, pretrain=None, skip_train=0, seed=74269, epoch=50, start_epoch=None, gpu='0', multi_gpu=None, suffix=None, debug=0, test=0, argv='train.py --batch_size 20 --epoch 50 --learning_rate 0.0001')
+2026-01-07 14:01:16,098 - root - INFO - ---------------------------------------------------TRANING---------------------------------------------------
+2026-01-07 14:01:16,098 - root - INFO - Use seed: 74269
+2026-01-07 14:01:16,434 - root - INFO - Namespace(embedding_dim=128, image_size=(128, 128), input_dim=3, attribute_dim=35, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True)
+2026-01-07 14:01:16,434 - root - INFO - Model(
   (obj_embeddings): Embedding(18, 128)
   (pred_embeddings): Embedding(10, 128)
   (gconv): GraphTripleConv(
@@ -92,5 +92,11 @@
     (3): LeakyReLU(negative_slope=0.01)
   )
 )
-2026-01-07 12:08:14,900 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=150.
-2026-01-07 12:08:45,822 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-07 14:01:16,547 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=50.
+2026-01-07 14:01:36,531 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-07 14:02:41,221 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.013102568686008453, 'total_loss': 0.013102568686008453}
+2026-01-07 14:02:41,221 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.03218526490615195, 'gene_acc': 0.003874695561335685, 'box_refine_iou': 0.000454824363414739}
+2026-01-07 14:02:41,221 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:42.440
+2026-01-07 14:02:41,255 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:01:04.717
+2026-01-07 14:02:41,962 - root - INFO - Train, Epoch1, Loss: {'box_mse': 0.020271746441721916, 'total_loss': 0.020271746441721916}
+2026-01-07 14:02:42,028 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:01:06.605

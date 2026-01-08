@@ -168,8 +168,7 @@ def get_scheduler(optimizer,args):
 
 def get_losses(args):
     loss = {}
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    weight = torch.ones(18).to(device)
+    weight = torch.ones(18).cuda()
     weight[13]=weight[14]=0 # ignore External and ExteriorWall categories (not used in ResPlan)
     if args.gene_layout: 
         loss['gene_ce'] = torch.nn.CrossEntropyLoss(weight=weight)
@@ -187,13 +186,12 @@ def get_losses(args):
     return loss
 
 def batch_cuda(batch):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     batch = list(batch)
     for i in range(len(batch)):
         if isinstance(batch[i],torch.Tensor):
-            batch[i] = batch[i].to(device)
+            batch[i] = batch[i].cuda()
         elif isinstance(batch[i],list) and isinstance(batch[i][0],torch.Tensor):
-            batch[i] = [e.to(device) for e in batch[i]]
+            batch[i] = [e.cuda() for e in batch[i]]
     return batch
 
 def main(args):
@@ -258,16 +256,10 @@ def main(args):
     loss = get_losses(args)
 
     if args.pretrain is not None:
-        # Load checkpoint with CPU/GPU compatibility
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        checkpoint = torch.load(args.pretrain, map_location=device)
-        model.load_state_dict(checkpoint)
-        print(f"Loaded checkpoint from {args.pretrain} on {device}")
+        model.load_state_dict(torch.load(args.pretrain))
 
-    # Move model to GPU if available, otherwise CPU
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    model.to(device)
+    print("Cuda...")
+    model.cuda()
 
     def update(engine,batch):
         model.train()
@@ -464,9 +456,8 @@ def main(args):
             
             # Final check for total_loss
             if torch.isnan(total_loss) or torch.isinf(total_loss):
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                 logging.warning(f"NaN/Inf total_loss during validation at epoch {engine.state.epoch}, setting to 0")
-                total_loss = torch.tensor(0.0).to(device)
+                total_loss = torch.tensor(0.0).cuda()
             
             loss_items['total_loss'] = total_loss.item()
 
@@ -518,17 +509,7 @@ def main(args):
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def evaluate(engine):
-        # Run validation only every 5 epochs to save time
-        if engine.state.epoch % 5 == 0 or engine.state.epoch == 1:
-            logging.info(f"Running validation at epoch {engine.state.epoch}")
-            valid_evaluator.run(valid_loader)
-            # Clear CUDA cache after validation to prevent memory accumulation
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-            logging.info(f"Validation completed, CUDA cache cleared")
-        else:
-            logging.info(f"Skipping validation at epoch {engine.state.epoch} (runs every 5 epochs)")
+        valid_evaluator.run(valid_loader)
 
     # Metrics
     MetricAverage(output_transform=lambda output:iou(output['pred'][0],output['gt'][1])).attach(valid_evaluator,'box_iou')

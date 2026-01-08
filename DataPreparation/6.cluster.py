@@ -21,9 +21,15 @@ for i in tqdm(range(len(tf_train))):
 d = 1000
 tf = np.array(tf).astype(np.float32)
 
-ncentroids = 1000
+# Adjust number of clusters based on training data size
+# Cannot have more clusters than training samples
+n_samples = len(tf)
+ncentroids = min(1000, n_samples)  # Use at most 1000 clusters or number of samples
 niter = 200
 verbose = True
+
+print(f"Training samples: {n_samples}")
+print(f"Number of clusters: {ncentroids}")
 
 # Use GPU if available, otherwise CPU
 try:
@@ -36,8 +42,12 @@ centroids = kmeans.centroids
 
 index = faiss.IndexFlatL2(d)
 index.add(tf)
-nNN = 1000
+nNN = min(1000, n_samples)  # Adjust nearest neighbors to match available samples
 D, I = index.search (kmeans.centroids, nNN)
 
 np.save(f'./data/centroids_train.npy',centroids)
 np.save(f'./data/clusters_train.npy',I)
+
+print(f"\n✅ Clustering complete!")
+print(f"Centroids saved: ./data/centroids_train.npy ({ncentroids} clusters)")
+print(f"Clusters saved: ./data/clusters_train.npy")

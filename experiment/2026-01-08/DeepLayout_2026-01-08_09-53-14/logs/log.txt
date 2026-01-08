@@ -1,0 +1,315 @@
+2026-01-08 09:53:14,402 - root - INFO - python train.py --batch_size 20 --epoch 50 --learning_rate 0.0001 --workers 2 --skip_train 1 --pretrain 
+2026-01-08 09:53:14,402 - root - INFO - Namespace(dataset_dir='./data', image_size=(128, 128), input_dim=3, with_house=False, pos_dim=25, area_dim=10, batch_size=20, workers=2, train_shuffle=True, gene_layout=True, box_refine=True, embedding_dim=128, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True, gt_box=0, relative=1, mutex=1, inside=1, coverage=1, render=1, nsample=100, loss_refine=0, render_refine=0, optimizer='Adam', scheduler='plateau', learning_rate=0.0001, decay_rate=0.0001, step_size=10, step_rate=0.5, save_interval=5, n_saved=20, pretrain=None, skip_train=0, seed=74269, epoch=50, start_epoch=None, gpu='0', multi_gpu=None, suffix=None, debug=0, test=0, argv='train.py --batch_size 20 --epoch 50 --learning_rate 0.0001 --workers 2')
+2026-01-08 09:53:14,403 - root - INFO - ---------------------------------------------------TRANING---------------------------------------------------
+2026-01-08 09:53:14,403 - root - INFO - Use seed: 74269
+2026-01-08 09:53:14,733 - root - INFO - Namespace(embedding_dim=128, image_size=(128, 128), input_dim=3, attribute_dim=35, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True)
+2026-01-08 09:53:14,733 - root - INFO - Model(
+  (obj_embeddings): Embedding(18, 128)
+  (pred_embeddings): Embedding(10, 128)
+  (gconv): GraphTripleConv(
+    (net1): Sequential(
+      (0): Linear(in_features=454, out_features=512, bias=True)
+      (1): LeakyReLU(negative_slope=0.01)
+      (2): Linear(in_features=512, out_features=1152, bias=True)
+      (3): LeakyReLU(negative_slope=0.01)
+    )
+    (net2): Sequential(
+      (0): Linear(in_features=512, out_features=512, bias=True)
+      (1): LeakyReLU(negative_slope=0.01)
+      (2): Linear(in_features=512, out_features=128, bias=True)
+      (3): LeakyReLU(negative_slope=0.01)
+    )
+  )
+  (gconv_net): GraphTripleConvNet(
+    (gconvs): ModuleList(
+      (0-3): 4 x GraphTripleConv(
+        (net1): Sequential(
+          (0): Linear(in_features=384, out_features=512, bias=True)
+          (1): LeakyReLU(negative_slope=0.01)
+          (2): Linear(in_features=512, out_features=1152, bias=True)
+          (3): LeakyReLU(negative_slope=0.01)
+        )
+        (net2): Sequential(
+          (0): Linear(in_features=512, out_features=512, bias=True)
+          (1): LeakyReLU(negative_slope=0.01)
+          (2): Linear(in_features=512, out_features=128, bias=True)
+          (3): LeakyReLU(negative_slope=0.01)
+        )
+      )
+    )
+  )
+  (inside_cnn): Sequential(
+    (0): Sequential(
+      (0): Conv2d(3, 32, kernel_size=(3, 3), stride=(2, 2))
+      (1): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): LeakyReLU(negative_slope=0.01)
+      (3): Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2))
+      (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (5): LeakyReLU(negative_slope=0.01)
+      (6): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2))
+      (7): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (8): LeakyReLU(negative_slope=0.01)
+      (9): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2))
+    )
+    (1): AdaptiveAvgPool2d(output_size=1)
+  )
+  (box_net): Sequential(
+    (0): Linear(in_features=384, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=4, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+  (rel_aux_net): Sequential(
+    (0): Linear(in_features=384, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=13, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+  (refinement_net): Sequential(
+    (0): Conv2d(384, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): LeakyReLU(negative_slope=0.01)
+    (3): Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (5): LeakyReLU(negative_slope=0.01)
+    (6): Conv2d(64, 18, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  )
+  (box_refine_backbone): Sequential(
+    (0): Conv2d(18, 64, kernel_size=(3, 3), stride=(2, 2))
+    (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): LeakyReLU(negative_slope=0.01)
+    (3): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2))
+    (4): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (5): LeakyReLU(negative_slope=0.01)
+    (6): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2))
+  )
+  (roi_align): RoIAlign(output_size=(8, 8), spatial_scale=0.125, sampling_ratio=-1, aligned=False)
+  (down_sample): AdaptiveAvgPool2d(output_size=1)
+  (box_reg): Sequential(
+    (0): Linear(in_features=640, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=4, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+)
+2026-01-08 09:53:14,954 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=50.
+2026-01-08 09:53:20,373 - root - INFO - Running validation at epoch 1
+2026-01-08 09:53:20,373 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 09:53:50,992 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.015349217690527439, 'total_loss': 0.015349217690527439}
+2026-01-08 09:53:50,992 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.008820784765115592, 'gene_acc': 0.005186858412233439, 'box_refine_iou': 0.0}
+2026-01-08 09:53:50,992 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:25.277
+2026-01-08 09:53:51,016 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:30.642
+2026-01-08 09:53:51,505 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 09:53:51,506 - root - INFO - Train, Epoch1, Loss: {'box_mse': 0.021062569692730904, 'total_loss': 0.021062569692730904}
+2026-01-08 09:53:51,565 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:32.072
+2026-01-08 09:54:20,090 - root - INFO - Skipping validation at epoch 2 (runs every 5 epochs)
+2026-01-08 09:54:20,090 - root - INFO - Train, Epoch2, Loss: {'gene_ce': 0.17972417175769806, 'box_mse': 0.014917813241481781, 'mutex': 0.0004320563457440585, 'inside': 1.3276588788357913e-06, 'coverage': 0.0004116695490665734, 'render': 0.015568372793495655, 'total_loss': 0.21105541288852692}
+2026-01-08 09:54:22,027 - ignite.engine.engine.Engine - INFO - Epoch[2] Complete. Time taken: 00:00:30.461
+2026-01-08 09:54:54,307 - root - INFO - Skipping validation at epoch 3 (runs every 5 epochs)
+2026-01-08 09:54:54,307 - root - INFO - Train, Epoch3, Loss: {'gene_ce': 0.648520827293396, 'box_mse': 0.016006937250494957, 'box_ref_mse': 0.0017007747665047646, 'mutex': 0.00031327182659879327, 'inside': 7.658475078642368e-05, 'coverage': 0.0008098693797364831, 'render': 0.016396990045905113, 'total_loss': 0.6838252544403076}
+2026-01-08 09:54:54,497 - ignite.engine.engine.Engine - INFO - Epoch[3] Complete. Time taken: 00:00:32.470
+2026-01-08 09:55:27,744 - root - INFO - Skipping validation at epoch 4 (runs every 5 epochs)
+2026-01-08 09:55:27,744 - root - INFO - Train, Epoch4, Loss: {'gene_ce': 1.0668727159500122, 'box_mse': 0.011414503678679466, 'box_ref_mse': 0.004189972300082445, 'mutex': 0.0004344282206147909, 'inside': 0.0001453086588298902, 'coverage': 0.00036783036193810403, 'render': 0.014141004532575607, 'total_loss': 1.097565770149231}
+2026-01-08 09:55:27,889 - ignite.engine.engine.Engine - INFO - Epoch[4] Complete. Time taken: 00:00:33.393
+2026-01-08 09:56:02,591 - root - INFO - Running validation at epoch 5
+2026-01-08 09:56:02,591 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 09:56:52,960 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.010934324003756046, 'total_loss': 0.010934324003756046}
+2026-01-08 09:56:52,960 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.05798228932322345, 'gene_acc': 0.29700743881498654, 'box_refine_iou': 0.05074191852194964}
+2026-01-08 09:56:52,960 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:44.793
+2026-01-08 09:56:52,999 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:50.409
+2026-01-08 09:56:54,951 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 09:56:54,951 - root - INFO - Train, Epoch5, Loss: {'gene_ce': 0.9952322244644165, 'box_mse': 0.011856009252369404, 'box_ref_mse': 0.00934317335486412, 'mutex': 0.0002792704326566309, 'inside': 8.736370364204049e-05, 'coverage': 0.00026145883020944893, 'render': 0.013173195533454418, 'total_loss': 1.0302326679229736}
+2026-01-08 09:56:55,094 - ignite.engine.engine.Engine - INFO - Epoch[5] Complete. Time taken: 00:01:27.205
+2026-01-08 09:57:49,777 - root - INFO - Skipping validation at epoch 6 (runs every 5 epochs)
+2026-01-08 09:57:49,777 - root - INFO - Train, Epoch6, Loss: {'gene_ce': 1.0329753160476685, 'box_mse': 0.016790546476840973, 'box_ref_mse': 0.008664263412356377, 'mutex': 0.0005761973443441093, 'inside': 0.00021400484547484666, 'coverage': 0.00014513888163492084, 'render': 0.021590610966086388, 'total_loss': 1.080955982208252}
+2026-01-08 09:57:51,860 - ignite.engine.engine.Engine - INFO - Epoch[6] Complete. Time taken: 00:00:56.766
+2026-01-08 09:58:51,249 - root - INFO - Skipping validation at epoch 7 (runs every 5 epochs)
+2026-01-08 09:58:51,249 - root - INFO - Train, Epoch7, Loss: {'gene_ce': 1.011789321899414, 'box_mse': 0.015310247428715229, 'box_ref_mse': 0.008247697725892067, 'mutex': 0.0006152970599941909, 'inside': 0.00012907585187349468, 'coverage': 0.00011709666432579979, 'render': 0.017395662143826485, 'total_loss': 1.0536043643951416}
+2026-01-08 09:58:51,849 - ignite.engine.engine.Engine - INFO - Epoch[7] Complete. Time taken: 00:00:59.989
+2026-01-08 09:59:46,999 - root - INFO - Skipping validation at epoch 8 (runs every 5 epochs)
+2026-01-08 09:59:46,999 - root - INFO - Train, Epoch8, Loss: {'gene_ce': 0.9267560839653015, 'box_mse': 0.019243406131863594, 'box_ref_mse': 0.009979836642742157, 'mutex': 0.0006154051516205072, 'inside': 0.00016473997675348073, 'coverage': 0.00010214532085228711, 'render': 0.020006291568279266, 'total_loss': 0.9768679738044739}
+2026-01-08 09:59:47,464 - ignite.engine.engine.Engine - INFO - Epoch[8] Complete. Time taken: 00:00:55.616
+2026-01-08 10:00:46,729 - root - INFO - Skipping validation at epoch 9 (runs every 5 epochs)
+2026-01-08 10:00:46,729 - root - INFO - Train, Epoch9, Loss: {'gene_ce': 0.8755872249603271, 'box_mse': 0.012530672363936901, 'box_ref_mse': 0.007043278776109219, 'mutex': 0.00038368484820239246, 'inside': 0.0001281512522837147, 'coverage': 0.00012978202721569687, 'render': 0.014667735435068607, 'total_loss': 0.9104705452919006}
+2026-01-08 10:00:48,447 - ignite.engine.engine.Engine - INFO - Epoch[9] Complete. Time taken: 00:01:00.983
+2026-01-08 10:01:40,605 - root - INFO - Running validation at epoch 10
+2026-01-08 10:01:40,605 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:04:39,932 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.008472147397696972, 'total_loss': 0.008472147397696972}
+2026-01-08 10:04:39,932 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.0613329459633296, 'gene_acc': 0.304441266773208, 'box_refine_iou': 0.06544046611322389}
+2026-01-08 10:04:39,932 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:02:53.347
+2026-01-08 10:04:39,966 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:02:59.361
+2026-01-08 10:04:41,655 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:04:41,655 - root - INFO - Train, Epoch10, Loss: {'gene_ce': 0.9379774332046509, 'box_mse': 0.013892054557800293, 'box_ref_mse': 0.006915772799402475, 'mutex': 0.00038703129393979907, 'inside': 0.00016051232523750514, 'coverage': 0.00017174809181597084, 'render': 0.017396507784724236, 'total_loss': 0.9769009947776794}
+2026-01-08 10:04:41,832 - ignite.engine.engine.Engine - INFO - Epoch[10] Complete. Time taken: 00:03:53.385
+2026-01-08 10:08:14,379 - root - INFO - Skipping validation at epoch 11 (runs every 5 epochs)
+2026-01-08 10:08:14,379 - root - INFO - Train, Epoch11, Loss: {'gene_ce': 0.8531193733215332, 'box_mse': 0.015557441860437393, 'box_ref_mse': 0.007278225850313902, 'mutex': 0.0004433412686921656, 'inside': 0.00010203432611888275, 'coverage': 8.213307592086494e-05, 'render': 0.018554318696260452, 'total_loss': 0.8951368927955627}
+2026-01-08 10:08:18,811 - ignite.engine.engine.Engine - INFO - Epoch[11] Complete. Time taken: 00:03:36.979
+2026-01-08 10:11:54,031 - root - INFO - Skipping validation at epoch 12 (runs every 5 epochs)
+2026-01-08 10:11:54,031 - root - INFO - Train, Epoch12, Loss: {'gene_ce': 0.9254310727119446, 'box_mse': 0.014030183665454388, 'box_ref_mse': 0.006895461585372686, 'mutex': 0.0004605800786521286, 'inside': 5.941561175859533e-05, 'coverage': 0.0001237529650097713, 'render': 0.01627550832927227, 'total_loss': 0.9632759690284729}
+2026-01-08 10:11:55,223 - ignite.engine.engine.Engine - INFO - Epoch[12] Complete. Time taken: 00:03:36.412
+2026-01-08 10:15:33,513 - root - INFO - Skipping validation at epoch 13 (runs every 5 epochs)
+2026-01-08 10:15:33,513 - root - INFO - Train, Epoch13, Loss: {'gene_ce': 0.9264770150184631, 'box_mse': 0.014226319268345833, 'box_ref_mse': 0.0070448098704218864, 'mutex': 0.0005631849053315818, 'inside': 9.419512207387015e-05, 'coverage': 7.278440898517147e-05, 'render': 0.017261499539017677, 'total_loss': 0.9657397866249084}
+2026-01-08 10:15:39,278 - ignite.engine.engine.Engine - INFO - Epoch[13] Complete. Time taken: 00:03:44.055
+2026-01-08 10:19:01,310 - root - INFO - Skipping validation at epoch 14 (runs every 5 epochs)
+2026-01-08 10:19:01,310 - root - INFO - Train, Epoch14, Loss: {'gene_ce': 0.8633280396461487, 'box_mse': 0.013738362118601799, 'box_ref_mse': 0.006580036599189043, 'mutex': 0.0005300400662235916, 'inside': 0.00011551540956133977, 'coverage': 8.346203685505316e-05, 'render': 0.016050707548856735, 'total_loss': 0.9004261493682861}
+2026-01-08 10:19:05,830 - ignite.engine.engine.Engine - INFO - Epoch[14] Complete. Time taken: 00:03:26.551
+2026-01-08 10:22:49,882 - root - INFO - Running validation at epoch 15
+2026-01-08 10:22:49,882 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:23:50,678 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.008239109069108963, 'total_loss': 0.008239109069108963}
+2026-01-08 10:23:50,678 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.08695623800322706, 'gene_acc': 0.33028104038109746, 'box_refine_iou': 0.08403097448750496}
+2026-01-08 10:23:50,678 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:55.305
+2026-01-08 10:23:50,708 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:01:00.825
+2026-01-08 10:23:52,405 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:23:52,405 - root - INFO - Train, Epoch15, Loss: {'gene_ce': 0.8262026309967041, 'box_mse': 0.014929767698049545, 'box_ref_mse': 0.006449899636209011, 'mutex': 0.0005845100968144834, 'inside': 0.00013750599464401603, 'coverage': 5.907313243369572e-05, 'render': 0.017485974356532097, 'total_loss': 0.8658493161201477}
+2026-01-08 10:23:52,562 - ignite.engine.engine.Engine - INFO - Epoch[15] Complete. Time taken: 00:04:46.732
+2026-01-08 10:24:23,833 - root - INFO - Skipping validation at epoch 16 (runs every 5 epochs)
+2026-01-08 10:24:23,833 - root - INFO - Train, Epoch16, Loss: {'gene_ce': 0.7420438528060913, 'box_mse': 0.016194550320506096, 'box_ref_mse': 0.005344667471945286, 'mutex': 0.00042378195212222636, 'inside': 0.00022628319857176393, 'coverage': 4.927035843138583e-05, 'render': 0.019249694421887398, 'total_loss': 0.7835320830345154}
+2026-01-08 10:24:23,959 - ignite.engine.engine.Engine - INFO - Epoch[16] Complete. Time taken: 00:00:31.398
+2026-01-08 10:25:01,177 - root - INFO - Skipping validation at epoch 17 (runs every 5 epochs)
+2026-01-08 10:25:01,177 - root - INFO - Train, Epoch17, Loss: {'gene_ce': 0.7146407961845398, 'box_mse': 0.013265060260891914, 'box_ref_mse': 0.005190233234316111, 'mutex': 0.00037335589877329767, 'inside': 0.00011826092668343335, 'coverage': 2.915633376687765e-05, 'render': 0.015996597707271576, 'total_loss': 0.7496134638786316}
+2026-01-08 10:25:01,310 - ignite.engine.engine.Engine - INFO - Epoch[17] Complete. Time taken: 00:00:37.351
+2026-01-08 10:25:46,943 - root - INFO - Skipping validation at epoch 18 (runs every 5 epochs)
+2026-01-08 10:25:46,943 - root - INFO - Train, Epoch18, Loss: {'gene_ce': 0.6880589127540588, 'box_mse': 0.01467110961675644, 'box_ref_mse': 0.0057456460781395435, 'mutex': 0.00048721619532443583, 'inside': 9.234927711077034e-05, 'coverage': 3.7758585676783696e-05, 'render': 0.015354117378592491, 'total_loss': 0.7244470119476318}
+2026-01-08 10:25:47,081 - ignite.engine.engine.Engine - INFO - Epoch[18] Complete. Time taken: 00:00:45.771
+2026-01-08 10:26:27,852 - root - INFO - Skipping validation at epoch 19 (runs every 5 epochs)
+2026-01-08 10:26:27,852 - root - INFO - Train, Epoch19, Loss: {'gene_ce': 0.6974853277206421, 'box_mse': 0.014595381915569305, 'box_ref_mse': 0.005801960360258818, 'mutex': 0.0004920806968584657, 'inside': 0.00013570387091021985, 'coverage': 4.0025457565207034e-05, 'render': 0.015914885327219963, 'total_loss': 0.7344654202461243}
+2026-01-08 10:26:27,988 - ignite.engine.engine.Engine - INFO - Epoch[19] Complete. Time taken: 00:00:40.908
+2026-01-08 10:27:05,411 - root - INFO - Running validation at epoch 20
+2026-01-08 10:27:05,411 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:27:46,149 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.008038574829697609, 'total_loss': 0.008038574829697609}
+2026-01-08 10:27:46,150 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.08384561397802759, 'gene_acc': 0.3227729667791144, 'box_refine_iou': 0.0849738846316086}
+2026-01-08 10:27:46,150 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:35.380
+2026-01-08 10:27:46,180 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:40.769
+2026-01-08 10:27:47,676 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:27:47,676 - root - INFO - Train, Epoch20, Loss: {'gene_ce': 0.6836578249931335, 'box_mse': 0.015031283721327782, 'box_ref_mse': 0.005099285393953323, 'mutex': 0.0005275040166452527, 'inside': 0.0002516113454475999, 'coverage': 5.900553151150234e-05, 'render': 0.016886448487639427, 'total_loss': 0.7215129733085632}
+2026-01-08 10:27:47,844 - ignite.engine.engine.Engine - INFO - Epoch[20] Complete. Time taken: 00:01:19.856
+2026-01-08 10:28:47,312 - root - INFO - Skipping validation at epoch 21 (runs every 5 epochs)
+2026-01-08 10:28:47,312 - root - INFO - Train, Epoch21, Loss: {'gene_ce': 0.8014333248138428, 'box_mse': 0.013516006991267204, 'box_ref_mse': 0.005704764276742935, 'mutex': 0.00044267228804528713, 'inside': 0.0001284533936996013, 'coverage': 6.431960355257615e-05, 'render': 0.015523894689977169, 'total_loss': 0.8368134498596191}
+2026-01-08 10:28:49,687 - ignite.engine.engine.Engine - INFO - Epoch[21] Complete. Time taken: 00:01:01.842
+2026-01-08 10:29:53,008 - root - INFO - Skipping validation at epoch 22 (runs every 5 epochs)
+2026-01-08 10:29:53,008 - root - INFO - Train, Epoch22, Loss: {'gene_ce': 0.6392443180084229, 'box_mse': 0.013305077329277992, 'box_ref_mse': 0.004596127662807703, 'mutex': 0.00046549062244594097, 'inside': 0.000102433972642757, 'coverage': 3.0335582778207026e-05, 'render': 0.015233633108437061, 'total_loss': 0.6729774475097656}
+2026-01-08 10:29:53,120 - ignite.engine.engine.Engine - INFO - Epoch[22] Complete. Time taken: 00:01:03.433
+2026-01-08 10:31:17,817 - root - INFO - Skipping validation at epoch 23 (runs every 5 epochs)
+2026-01-08 10:31:17,817 - root - INFO - Train, Epoch23, Loss: {'gene_ce': 0.731576144695282, 'box_mse': 0.012863591313362122, 'box_ref_mse': 0.004721575882285833, 'mutex': 0.0005469867028295994, 'inside': 6.752915942342952e-05, 'coverage': 5.648210571962409e-05, 'render': 0.014369173906743526, 'total_loss': 0.7642015218734741}
+2026-01-08 10:31:20,268 - ignite.engine.engine.Engine - INFO - Epoch[23] Complete. Time taken: 00:01:27.148
+2026-01-08 10:32:20,300 - root - INFO - Skipping validation at epoch 24 (runs every 5 epochs)
+2026-01-08 10:32:20,300 - root - INFO - Train, Epoch24, Loss: {'gene_ce': 0.70511794090271, 'box_mse': 0.01314098946750164, 'box_ref_mse': 0.0036571964155882597, 'mutex': 0.000517841603141278, 'inside': 0.00013523043890018016, 'coverage': 3.128923344775103e-05, 'render': 0.015335345640778542, 'total_loss': 0.7379358410835266}
+2026-01-08 10:32:21,535 - ignite.engine.engine.Engine - INFO - Epoch[24] Complete. Time taken: 00:01:01.267
+2026-01-08 10:33:18,535 - root - INFO - Running validation at epoch 25
+2026-01-08 10:33:18,535 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:34:18,353 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.007915649563074112, 'total_loss': 0.007915649563074112}
+2026-01-08 10:34:18,353 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.08335967450962185, 'gene_acc': 0.23895934075441513, 'box_refine_iou': 0.08099666863948399}
+2026-01-08 10:34:18,353 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:54.735
+2026-01-08 10:34:18,386 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:59.852
+2026-01-08 10:34:20,076 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:34:20,076 - root - INFO - Train, Epoch25, Loss: {'gene_ce': 0.6407216191291809, 'box_mse': 0.014257686212658882, 'box_ref_mse': 0.0053960769437253475, 'mutex': 0.0003742290136869997, 'inside': 0.00011754067236324772, 'coverage': 2.0119563487241976e-05, 'render': 0.016028407961130142, 'total_loss': 0.67691570520401}
+2026-01-08 10:34:20,238 - ignite.engine.engine.Engine - INFO - Epoch[25] Complete. Time taken: 00:01:58.704
+2026-01-08 10:34:35,407 - root - INFO - Skipping validation at epoch 26 (runs every 5 epochs)
+2026-01-08 10:34:35,407 - root - INFO - Train, Epoch26, Loss: {'gene_ce': 0.7375378608703613, 'box_mse': 0.01881253533065319, 'box_ref_mse': 0.00594754284247756, 'mutex': 0.0006516458815895021, 'inside': 0.00017333282448817044, 'coverage': 2.684107494133059e-05, 'render': 0.022772977128624916, 'total_loss': 0.7859227061271667}
+2026-01-08 10:34:35,539 - ignite.engine.engine.Engine - INFO - Epoch[26] Complete. Time taken: 00:00:15.300
+2026-01-08 10:34:50,702 - root - INFO - Skipping validation at epoch 27 (runs every 5 epochs)
+2026-01-08 10:34:50,702 - root - INFO - Train, Epoch27, Loss: {'gene_ce': 0.6806015968322754, 'box_mse': 0.014707064256072044, 'box_ref_mse': 0.0054057869128882885, 'mutex': 0.00048771477304399014, 'inside': 0.00012191593850729987, 'coverage': 2.9905639166827314e-05, 'render': 0.01707926020026207, 'total_loss': 0.7184332013130188}
+2026-01-08 10:34:50,845 - ignite.engine.engine.Engine - INFO - Epoch[27] Complete. Time taken: 00:00:15.306
+2026-01-08 10:35:06,130 - root - INFO - Skipping validation at epoch 28 (runs every 5 epochs)
+2026-01-08 10:35:06,130 - root - INFO - Train, Epoch28, Loss: {'gene_ce': 0.6903856992721558, 'box_mse': 0.014719433151185513, 'box_ref_mse': 0.0039872461929917336, 'mutex': 0.0006009740754961967, 'inside': 0.00016392975521739572, 'coverage': 2.0432429664651863e-05, 'render': 0.01650875061750412, 'total_loss': 0.7263864874839783}
+2026-01-08 10:35:06,260 - ignite.engine.engine.Engine - INFO - Epoch[28] Complete. Time taken: 00:00:15.416
+2026-01-08 10:35:21,475 - root - INFO - Skipping validation at epoch 29 (runs every 5 epochs)
+2026-01-08 10:35:21,475 - root - INFO - Train, Epoch29, Loss: {'gene_ce': 0.6868086457252502, 'box_mse': 0.014105009846389294, 'box_ref_mse': 0.00542835658416152, 'mutex': 0.0004137663636356592, 'inside': 0.00011124456068500876, 'coverage': 2.0244639017619193e-05, 'render': 0.0157415010035038, 'total_loss': 0.7226288318634033}
+2026-01-08 10:35:21,624 - ignite.engine.engine.Engine - INFO - Epoch[29] Complete. Time taken: 00:00:15.362
+2026-01-08 10:35:37,219 - root - INFO - Running validation at epoch 30
+2026-01-08 10:35:37,219 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:36:17,580 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.00790165364742279, 'total_loss': 0.00790165364742279}
+2026-01-08 10:36:17,580 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.09896988333107001, 'gene_acc': 0.2637458831434291, 'box_refine_iou': 0.09177809931969104}
+2026-01-08 10:36:17,580 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:35.234
+2026-01-08 10:36:17,615 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:40.395
+2026-01-08 10:36:18,229 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:36:18,229 - root - INFO - Train, Epoch30, Loss: {'gene_ce': 0.8252240419387817, 'box_mse': 0.015017475001513958, 'box_ref_mse': 0.006080045364797115, 'mutex': 0.0005766419344581664, 'inside': 0.00011943325080210343, 'coverage': 4.018525578430854e-05, 'render': 0.018050774931907654, 'total_loss': 0.8651085495948792}
+2026-01-08 10:36:18,410 - ignite.engine.engine.Engine - INFO - Epoch[30] Complete. Time taken: 00:00:56.786
+2026-01-08 10:36:39,386 - root - INFO - Skipping validation at epoch 31 (runs every 5 epochs)
+2026-01-08 10:36:39,386 - root - INFO - Train, Epoch31, Loss: {'gene_ce': 0.7520169019699097, 'box_mse': 0.013671713881194592, 'box_ref_mse': 0.00457685487344861, 'mutex': 0.00048594409599900246, 'inside': 0.0001244983432115987, 'coverage': 3.050822670047637e-05, 'render': 0.015735212713479996, 'total_loss': 0.7866416573524475}
+2026-01-08 10:36:40,585 - ignite.engine.engine.Engine - INFO - Epoch[31] Complete. Time taken: 00:00:22.175
+2026-01-08 10:37:01,502 - root - INFO - Skipping validation at epoch 32 (runs every 5 epochs)
+2026-01-08 10:37:01,502 - root - INFO - Train, Epoch32, Loss: {'gene_ce': 0.658566951751709, 'box_mse': 0.014243673533201218, 'box_ref_mse': 0.0054403250105679035, 'mutex': 0.0005823700921609998, 'inside': 0.00016455109289381653, 'coverage': 1.4132649994280655e-05, 'render': 0.01589764468371868, 'total_loss': 0.6949096918106079}
+2026-01-08 10:37:01,900 - ignite.engine.engine.Engine - INFO - Epoch[32] Complete. Time taken: 00:00:21.316
+2026-01-08 10:37:20,602 - root - INFO - Skipping validation at epoch 33 (runs every 5 epochs)
+2026-01-08 10:37:20,602 - root - INFO - Train, Epoch33, Loss: {'gene_ce': 0.7330546975135803, 'box_mse': 0.014622959308326244, 'box_ref_mse': 0.00605794508010149, 'mutex': 0.00048772632726468146, 'inside': 0.0001341896568192169, 'coverage': 6.874533573864028e-05, 'render': 0.015501839108765125, 'total_loss': 0.7699280977249146}
+2026-01-08 10:37:20,716 - ignite.engine.engine.Engine - INFO - Epoch[33] Complete. Time taken: 00:00:18.816
+2026-01-08 10:37:41,125 - root - INFO - Skipping validation at epoch 34 (runs every 5 epochs)
+2026-01-08 10:37:41,125 - root - INFO - Train, Epoch34, Loss: {'gene_ce': 0.6548975706100464, 'box_mse': 0.013214635662734509, 'box_ref_mse': 0.004647648427635431, 'mutex': 0.0004999932134523988, 'inside': 0.0001276690309168771, 'coverage': 2.536970168875996e-05, 'render': 0.015130855143070221, 'total_loss': 0.6885437965393066}
+2026-01-08 10:37:41,245 - ignite.engine.engine.Engine - INFO - Epoch[34] Complete. Time taken: 00:00:20.530
+2026-01-08 10:37:59,342 - root - INFO - Running validation at epoch 35
+2026-01-08 10:37:59,342 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:38:32,465 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.007812678813934326, 'total_loss': 0.007812678813934326}
+2026-01-08 10:38:32,465 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.0990142564429952, 'gene_acc': 0.2647942485900668, 'box_refine_iou': 0.09360178551291837}
+2026-01-08 10:38:32,465 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:27.970
+2026-01-08 10:38:32,498 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:33.156
+2026-01-08 10:38:33,806 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:38:33,806 - root - INFO - Train, Epoch35, Loss: {'gene_ce': 0.6483544111251831, 'box_mse': 0.014339050278067589, 'box_ref_mse': 0.005871457047760487, 'mutex': 0.0005906703299842775, 'inside': 0.00014039974485058337, 'coverage': 4.000365879619494e-05, 'render': 0.015092509798705578, 'total_loss': 0.6844285130500793}
+2026-01-08 10:38:33,959 - ignite.engine.engine.Engine - INFO - Epoch[35] Complete. Time taken: 00:00:52.713
+2026-01-08 10:39:20,536 - root - INFO - Skipping validation at epoch 36 (runs every 5 epochs)
+2026-01-08 10:39:20,536 - root - INFO - Train, Epoch36, Loss: {'gene_ce': 0.6243900656700134, 'box_mse': 0.01323044952005148, 'box_ref_mse': 0.00433789798989892, 'mutex': 0.000463232136098668, 'inside': 0.00011883791739819571, 'coverage': 2.6281883037881926e-05, 'render': 0.014768651686608791, 'total_loss': 0.6573354601860046}
+2026-01-08 10:39:20,650 - ignite.engine.engine.Engine - INFO - Epoch[36] Complete. Time taken: 00:00:46.691
+2026-01-08 10:40:04,098 - root - INFO - Skipping validation at epoch 37 (runs every 5 epochs)
+2026-01-08 10:40:04,098 - root - INFO - Train, Epoch37, Loss: {'gene_ce': 0.618739128112793, 'box_mse': 0.01301198173314333, 'box_ref_mse': 0.004744734149426222, 'mutex': 0.0004598034720402211, 'inside': 0.00014000300143379718, 'coverage': 2.874164783861488e-05, 'render': 0.013766180723905563, 'total_loss': 0.6508905291557312}
+2026-01-08 10:40:04,213 - ignite.engine.engine.Engine - INFO - Epoch[37] Complete. Time taken: 00:00:43.562
+2026-01-08 10:40:46,736 - root - INFO - Skipping validation at epoch 38 (runs every 5 epochs)
+2026-01-08 10:40:46,736 - root - INFO - Train, Epoch38, Loss: {'gene_ce': 0.6145355105400085, 'box_mse': 0.013482409529387951, 'box_ref_mse': 0.004231072962284088, 'mutex': 0.000583285407628864, 'inside': 0.00014063515118323267, 'coverage': 2.184203731303569e-05, 'render': 0.016154251992702484, 'total_loss': 0.6491489410400391}
+2026-01-08 10:40:46,855 - ignite.engine.engine.Engine - INFO - Epoch[38] Complete. Time taken: 00:00:42.642
+2026-01-08 10:41:32,745 - root - INFO - Skipping validation at epoch 39 (runs every 5 epochs)
+2026-01-08 10:41:32,745 - root - INFO - Train, Epoch39, Loss: {'gene_ce': 0.632438063621521, 'box_mse': 0.011135589331388474, 'box_ref_mse': 0.0032435322646051645, 'mutex': 0.000493071973323822, 'inside': 0.0001435010926797986, 'coverage': 1.143392910307739e-05, 'render': 0.01211516372859478, 'total_loss': 0.6595803499221802}
+2026-01-08 10:41:33,903 - ignite.engine.engine.Engine - INFO - Epoch[39] Complete. Time taken: 00:00:47.048
+2026-01-08 10:42:19,756 - root - INFO - Running validation at epoch 40
+2026-01-08 10:42:19,756 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:42:53,494 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.007880019955337048, 'total_loss': 0.007880019955337048}
+2026-01-08 10:42:53,494 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.11666890815679784, 'gene_acc': 0.2996101756754009, 'box_refine_iou': 0.10111494118406082}
+2026-01-08 10:42:53,494 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:28.582
+2026-01-08 10:42:53,496 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:33.739
+2026-01-08 10:42:55,041 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:42:55,041 - root - INFO - Train, Epoch40, Loss: {'gene_ce': 0.5744460821151733, 'box_mse': 0.01304842159152031, 'box_ref_mse': 0.004481537267565727, 'mutex': 0.0005127258482389152, 'inside': 0.00011624641774687916, 'coverage': 4.9883557949215174e-05, 'render': 0.01601583883166313, 'total_loss': 0.608670711517334}
+2026-01-08 10:42:55,210 - ignite.engine.engine.Engine - INFO - Epoch[40] Complete. Time taken: 00:01:21.306
+2026-01-08 10:43:21,964 - root - INFO - Skipping validation at epoch 41 (runs every 5 epochs)
+2026-01-08 10:43:21,964 - root - INFO - Train, Epoch41, Loss: {'gene_ce': 0.5654364824295044, 'box_mse': 0.012576954439282417, 'box_ref_mse': 0.0038542302791029215, 'mutex': 0.0005121416179463267, 'inside': 0.00013828142255079, 'coverage': 2.118811971740797e-05, 'render': 0.01443205401301384, 'total_loss': 0.5969712734222412}
+2026-01-08 10:43:22,076 - ignite.engine.engine.Engine - INFO - Epoch[41] Complete. Time taken: 00:00:26.867
+2026-01-08 10:43:41,212 - root - INFO - Skipping validation at epoch 42 (runs every 5 epochs)
+2026-01-08 10:43:41,212 - root - INFO - Train, Epoch42, Loss: {'gene_ce': 0.556362509727478, 'box_mse': 0.012718955986201763, 'box_ref_mse': 0.004605805967003107, 'mutex': 0.00042006821604445577, 'inside': 0.00013407452206593007, 'coverage': 1.675837665970903e-05, 'render': 0.014784672297537327, 'total_loss': 0.5890429019927979}
+2026-01-08 10:43:41,381 - ignite.engine.engine.Engine - INFO - Epoch[42] Complete. Time taken: 00:00:19.304
+2026-01-08 10:44:01,195 - root - INFO - Skipping validation at epoch 43 (runs every 5 epochs)
+2026-01-08 10:44:01,195 - root - INFO - Train, Epoch43, Loss: {'gene_ce': 0.5441420078277588, 'box_mse': 0.010316974483430386, 'box_ref_mse': 0.003705737879499793, 'mutex': 0.0003563306527212262, 'inside': 0.00013797472638543695, 'coverage': 2.7116198907606304e-05, 'render': 0.012117723934352398, 'total_loss': 0.5708038806915283}
+2026-01-08 10:44:01,300 - ignite.engine.engine.Engine - INFO - Epoch[43] Complete. Time taken: 00:00:19.920
+2026-01-08 10:44:36,829 - root - INFO - Skipping validation at epoch 44 (runs every 5 epochs)
+2026-01-08 10:44:36,829 - root - INFO - Train, Epoch44, Loss: {'gene_ce': 0.5720874667167664, 'box_mse': 0.014159158803522587, 'box_ref_mse': 0.004086167085915804, 'mutex': 0.0004976947675459087, 'inside': 0.00013418971502687782, 'coverage': 1.8266913684783503e-05, 'render': 0.014938629232347012, 'total_loss': 0.6059215664863586}
+2026-01-08 10:44:37,018 - ignite.engine.engine.Engine - INFO - Epoch[44] Complete. Time taken: 00:00:35.717
+2026-01-08 10:46:07,818 - root - INFO - Running validation at epoch 45
+2026-01-08 10:46:07,818 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:52:53,896 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.007621130906045437, 'total_loss': 0.007621130906045437}
+2026-01-08 10:52:53,896 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.1276548086821136, 'gene_acc': 0.27589655347603187, 'box_refine_iou': 0.10320650288379178}
+2026-01-08 10:52:53,896 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:06:40.763
+2026-01-08 10:52:53,925 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:06:46.107
+2026-01-08 10:52:56,775 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:52:56,775 - root - INFO - Train, Epoch45, Loss: {'gene_ce': 0.5914828181266785, 'box_mse': 0.012245300225913525, 'box_ref_mse': 0.0036006425507366657, 'mutex': 0.0006057465798221529, 'inside': 0.0001009323968901299, 'coverage': 2.831504389178008e-05, 'render': 0.013311244547367096, 'total_loss': 0.6213750243186951}
+2026-01-08 10:52:57,080 - ignite.engine.engine.Engine - INFO - Epoch[45] Complete. Time taken: 00:08:20.062
+2026-01-08 10:53:34,087 - root - INFO - Skipping validation at epoch 46 (runs every 5 epochs)
+2026-01-08 10:53:34,087 - root - INFO - Train, Epoch46, Loss: {'gene_ce': 0.5476496815681458, 'box_mse': 0.011892846785485744, 'box_ref_mse': 0.003362458199262619, 'mutex': 0.0004444600490387529, 'inside': 0.00011406276462366804, 'coverage': 1.4853004358883481e-05, 'render': 0.012459615245461464, 'total_loss': 0.5759380459785461}
+2026-01-08 10:53:35,055 - ignite.engine.engine.Engine - INFO - Epoch[46] Complete. Time taken: 00:00:37.975
+2026-01-08 10:54:14,310 - root - INFO - Skipping validation at epoch 47 (runs every 5 epochs)
+2026-01-08 10:54:14,311 - root - INFO - Train, Epoch47, Loss: {'gene_ce': 0.538605272769928, 'box_mse': 0.012563589960336685, 'box_ref_mse': 0.003851597895845771, 'mutex': 0.0004696670512203127, 'inside': 0.00016207426961045712, 'coverage': 2.130724533344619e-05, 'render': 0.014011718332767487, 'total_loss': 0.5696852207183838}
+2026-01-08 10:54:14,410 - ignite.engine.engine.Engine - INFO - Epoch[47] Complete. Time taken: 00:00:39.356
+2026-01-08 10:54:51,272 - root - INFO - Skipping validation at epoch 48 (runs every 5 epochs)
+2026-01-08 10:54:51,273 - root - INFO - Train, Epoch48, Loss: {'gene_ce': 0.5907175540924072, 'box_mse': 0.010227197781205177, 'box_ref_mse': 0.003495238721370697, 'mutex': 0.00043321732664480805, 'inside': 8.875683124642819e-05, 'coverage': 2.0474417397053912e-05, 'render': 0.012452280148863792, 'total_loss': 0.6174347400665283}
+2026-01-08 10:54:51,380 - ignite.engine.engine.Engine - INFO - Epoch[48] Complete. Time taken: 00:00:36.970
+2026-01-08 10:55:24,848 - root - INFO - Skipping validation at epoch 49 (runs every 5 epochs)
+2026-01-08 10:55:24,848 - root - INFO - Train, Epoch49, Loss: {'gene_ce': 0.5797452926635742, 'box_mse': 0.01087320875376463, 'box_ref_mse': 0.003097395645454526, 'mutex': 0.0004245777672622353, 'inside': 0.0001294021203648299, 'coverage': 2.2654161512036808e-05, 'render': 0.01169018168002367, 'total_loss': 0.6059827208518982}
+2026-01-08 10:55:24,958 - ignite.engine.engine.Engine - INFO - Epoch[49] Complete. Time taken: 00:00:33.578
+2026-01-08 10:56:01,247 - root - INFO - Running validation at epoch 50
+2026-01-08 10:56:01,247 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:56:31,478 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.007553944364190102, 'total_loss': 0.007553944364190102}
+2026-01-08 10:56:31,478 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.12491607816943216, 'gene_acc': 0.26910132966162764, 'box_refine_iou': 0.11685429154121463}
+2026-01-08 10:56:31,478 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:25.049
+2026-01-08 10:56:31,494 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:30.247
+2026-01-08 10:56:33,440 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-08 10:56:33,444 - root - INFO - Train, Epoch50, Loss: {'gene_ce': 0.6377680897712708, 'box_mse': 0.01044140662997961, 'box_ref_mse': 0.0029126470908522606, 'mutex': 0.0004241573333274573, 'inside': 0.00011067619925597683, 'coverage': 2.1108147848281078e-05, 'render': 0.010930577293038368, 'total_loss': 0.6626086831092834}
+2026-01-08 10:56:33,587 - ignite.engine.engine.Engine - INFO - Epoch[50] Complete. Time taken: 00:01:08.629
+2026-01-08 10:56:33,587 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 01:03:18.633
+2026-01-08 10:56:33,959 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-08 10:57:13,920 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:34.650
+2026-01-08 10:57:13,920 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:39.961

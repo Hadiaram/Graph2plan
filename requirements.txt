@@ -1,0 +1,32 @@
+# Graph2Plan Training Requirements
+# Python 3.10.11
+# Generated: 2026-01-07
+
+# Core Deep Learning Framework
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+
+# PyTorch Extensions
+torch-geometric==2.6.1
+pytorch-ignite==0.5.3
+pytorch-fid==0.3.0
+
+# Scientific Computing
+numpy==1.26.4
+scipy==1.15.3
+
+# Computer Vision
+opencv-python==4.9.0.80
+
+# Training Monitoring & Logging
+tensorboard==2.19.0
+tensorboard-data-server==0.7.2
+tensorboardX==2.6.2.2
+
+# Progress Bars & CLI
+tqdm==4.65.0
+
+# Note: This requirements.txt is for the Network training script.
+# For CUDA support, install PyTorch with CUDA 12.1:
+# pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121

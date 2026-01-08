@@ -27,15 +27,18 @@ __pycache__/
 Thumbs.db
 .env
 
-# Data folders
-Network/data/
+# Data folders (except Network/data which uses Git LFS)
+Network/data/ - COMMENTED OUT - tracked with Git LFS
 data/
 datasets/
+DataPreparation/data/
+Interface/static/Data/
 
-# Big binary artifacts
+# Big binary artifacts (except .mat files in Network/data which use Git LFS)
 *.npy
 *.npz
 *.pkl
+*.mat - COMMENTED OUT - .mat in Network/data/ tracked with Git LFS, others ignored
 *.mat
 *.pt
 *.pth

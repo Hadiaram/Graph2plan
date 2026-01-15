@@ -749,23 +749,163 @@ function GraphSearch() {
     });
 }
 
+function CreateLeftFloorPlan(boxes, exterior, door) {
+    // Clear existing floor plan
+    d3.select('#LeftLayoutSVG').selectAll('rect').remove();
+    d3.select('#LeftLayoutSVG').selectAll('polygon').remove();
+    d3.select('#LeftLayoutSVG').selectAll('line').remove();
+    d3.select('#LeftLayoutSVG').selectAll('clipPath').remove();
+
+    var border = 4;
+    var interiorwall_color = roomcolor("Interior wall");
+
+    // Create clipPath for boundary
+    d3.select("#LeftLayoutSVG").append("clipPath")
+        .attr("id", "left-clip-transferred")
+        .append("polygon")
+        .attr("points", exterior);
+
+    // Draw room rectangles
+    for (var i = 0; i < boxes.length; i++) {
+        var rx = boxes[i][0][0];
+        var ry = boxes[i][0][1];
+        var rw = boxes[i][0][2] - boxes[i][0][0];
+        var rh = boxes[i][0][3] - boxes[i][0][1];
+        var roomType = boxes[i][1][0];
+        var color = roomcolor(roomType);
+
+        var rect = d3.select("#LeftLayoutSVG")
+            .append("rect")
+            .attr("x", rx)
+            .attr("y", ry)
+            .attr("width", rw)
+            .attr("height", rh)
+            .attr("stroke-width", border)
+            .attr("stroke", interiorwall_color)
+            .attr("fill", color)
+            .attr("id", "transferred_" + roomType + "_" + i);
+
+        // Apply clipping (except balconies)
+        if (roomType !== "Balcony") {
+            rect.attr("clip-path", "url(#left-clip-transferred)");
+        }
+    }
+
+    // Draw boundary polygon
+    d3.select("#LeftLayoutSVG")
+        .append("polygon")
+        .attr("points", exterior)
+        .attr("fill", "none")
+        .attr("stroke", roomcolor("Exterior wall"))
+        .attr("stroke-width", border);
+
+    // Draw door
+    var doorCoords = door.split(",");
+    d3.select('#LeftLayoutSVG').append('line')
+        .attr("x1", doorCoords[0])
+        .attr("y1", doorCoords[1])
+        .attr("x2", doorCoords[2])
+        .attr("y2", doorCoords[3])
+        .attr("stroke", roomcolor("Front door"))
+        .attr("stroke-width", border);
+
+    d3.select('#LeftLayoutSVG').attr("transform", "scale(1.5)");
+}
+
 function CreateLeftGraph(rooms, roomID) {
     $.getJSON("/index/TransGraph/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
         //     $.getJSON("/index/TransGraph_net/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
         // Show Auto-Adjust button when graph is transferred
         document.getElementById("AutoAdjust").style.display = "block";
 
+        // Show Floor Plan visualization button
+        document.getElementById("ShowFloorPlan").style.display = "block";
+        document.getElementById("ShowFloorPlan").onclick = function () {
+            console.log("Showing current floor plan...");
+
+            // Get current graph state (edited nodes/edges)
+            var currentGraph = GetEditGraph(ret['rmpos']);
+
+            console.log("Current graph to send:", currentGraph);
+            console.log("userRoomID:", rooms.toString().split(',')[0]);
+            console.log("adptRoomID:", roomID);
+
+            // Send to backend to regenerate floor plan based on current graph using AI model
+            console.log("\n" + "=".repeat(80));
+            console.log("🚀 [FRONTEND] Show Floor Plan - Sending AdjustGraph request");
+            console.log("=".repeat(80));
+            console.log("📤 Request parameters:");
+            console.log("   → userRoomID:", rooms.toString().split(',')[0]);
+            console.log("   → adptRoomID:", roomID);
+            console.log("   → NewGraph:", currentGraph);
+            console.log("   → NewGraph structure: nodes=" + (currentGraph[0] ? currentGraph[0].length : 0) + 
+                        ", edges=" + (currentGraph[1] ? currentGraph[1].length : 0) +
+                        ", oldNodes=" + (currentGraph[2] ? currentGraph[2].length : 0));
+            
+            var requestStartTime = performance.now();
+            $.get("/index/AdjustGraph/", {
+                'NewGraph': JSON.stringify(currentGraph),
+                'userRoomID': rooms.toString().split(',')[0],
+                'adptRoomID': roomID
+            }, function (adjust_ret) {
+                var requestEndTime = performance.now();
+                console.log("\n✅ [FRONTEND] AdjustGraph response received");
+                console.log("   ⏱️  Request time: " + (requestEndTime - requestStartTime).toFixed(2) + "ms");
+                console.log("📥 Response data:");
+                console.log("   → roomret entries:", adjust_ret['roomret'] ? adjust_ret['roomret'].length : 0);
+                console.log("   → hsedge entries:", adjust_ret['hsedge'] ? adjust_ret['hsedge'].length : 0);
+                console.log("   → exterior:", adjust_ret['exterior'] ? "present" : "missing");
+                console.log("   → door:", adjust_ret['door'] ? "present" : "missing");
+                console.log("   → Full response:", adjust_ret);
+
+                // Use the AI-generated boxes from current graph
+                console.log("🎨 [FRONTEND] Rendering floor plan with CreateLeftFloorPlan...");
+                CreateLeftFloorPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret['door']);
+                console.log("✅ [FRONTEND] Floor plan rendering completed");
+                console.log("=".repeat(80) + "\n");
+            }).fail(function(xhr, status, error) {
+                var requestEndTime = performance.now();
+                console.error("\n" + "=".repeat(80));
+                console.error("❌ [FRONTEND] AdjustGraph request FAILED!");
+                console.error("=".repeat(80));
+                console.error("   ⏱️  Request time: " + (requestEndTime - requestStartTime).toFixed(2) + "ms");
+                console.error("   Status:", status);
+                console.error("   Error:", error);
+                console.error("   HTTP Status:", xhr.status);
+                console.error("   Response Text:", xhr.responseText);
+                console.error("   Response Headers:", xhr.getAllResponseHeaders());
+                console.error("=".repeat(80) + "\n");
+                alert("Error regenerating floor plan. Check browser console for details.");
+            });
+        };
+
         document.getElementById("Generate").onclick = function () {
             var AdjustNewGraph = [];
             AdjustNewGraph = GetEditGraph(ret['rmpos']);
             // NewGraph.push(ret['rmpos']);
 
+            console.log("\n" + "=".repeat(80));
+            console.log("🚀 [FRONTEND] Generate - Sending AdjustGraph request");
+            console.log("=".repeat(80));
+            console.log("📤 Request parameters:");
+            console.log("   → userRoomID:", rooms.toString().split(',')[0]);
+            console.log("   → adptRoomID:", roomID);
+            console.log("   → AdjustNewGraph:", AdjustNewGraph);
+            
+            var requestStartTime = performance.now();
             $.get("/index/AdjustGraph/", {
                 'NewGraph': JSON.stringify(AdjustNewGraph),
                 'userRoomID': rooms.toString().split(',')[0],
                 'adptRoomID': roomID
             }, function (adjust_ret) {
+                var requestEndTime = performance.now();
+                console.log("\n✅ [FRONTEND] Generate response received");
+                console.log("   ⏱️  Request time: " + (requestEndTime - requestStartTime).toFixed(2) + "ms");
+                console.log("📥 Response data:", adjust_ret);
+                console.log("   → rmpos:", adjust_ret['rmpos']);
+                
                 // console.log("ret");
+                console.log("🎨 [FRONTEND] Rendering with CreateLeftPlan...");
                 CreateLeftPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret["door"], adjust_ret["windows"], adjust_ret["indoor"], adjust_ret["windowsline"]);
                 d3.select('body').select('#LeftGraphSVG').selectAll('circle').attr("r", 0);
                 console.log(adjust_ret['rmpos']);
@@ -782,6 +922,19 @@ function CreateLeftGraph(rooms, roomID) {
                     }
                     Circlesize.attr("r", adjust_ret['rmsize'][i][0]);
                 }
+                console.log("✅ [FRONTEND] Generate completed");
+                console.log("=".repeat(80) + "\n");
+            }).fail(function(xhr, status, error) {
+                var requestEndTime = performance.now();
+                console.error("\n" + "=".repeat(80));
+                console.error("❌ [FRONTEND] Generate request FAILED!");
+                console.error("=".repeat(80));
+                console.error("   ⏱️  Request time: " + (requestEndTime - requestStartTime).toFixed(2) + "ms");
+                console.error("   Status:", status);
+                console.error("   Error:", error);
+                console.error("   Response:", xhr.responseText);
+                console.error("=".repeat(80) + "\n");
+                alert("Error generating floor plan. Check browser console for details.");
             });
         };
 

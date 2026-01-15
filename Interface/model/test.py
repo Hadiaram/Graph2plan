@@ -23,46 +23,93 @@ except ImportError:
 global adjust,indxlist
 adjust=False
 
+# Detect available device (GPU if available, otherwise CPU)
+DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {DEVICE}")
+
 def get_data(fp):
+    print(f"   🔧 [TEST] get_data: Converting floor plan to batch tensors")
     batch = list(fp.get_test_data())
-    batch[0] = batch[0].unsqueeze(0).cuda()
-    batch[1] = batch[1].cuda()
-    batch[2] = batch[2].cuda()
-    batch[3] = batch[3].cuda()
-    batch[4] = batch[4].cuda()
+    print(f"      → batch elements: {len(batch)}")
+    print(f"      → boundary shape: {batch[0].shape}, dtype: {batch[0].dtype}")
+    print(f"      → inside_box shape: {batch[1].shape}")
+    print(f"      → rooms shape: {batch[2].shape}, values: {batch[2]}")
+    print(f"      → attrs shape: {batch[3].shape}")
+    print(f"      → triples shape: {batch[4].shape}")
+    batch[0] = batch[0].unsqueeze(0).to(DEVICE)
+    batch[1] = batch[1].to(DEVICE)
+    batch[2] = batch[2].to(DEVICE)
+    batch[3] = batch[3].to(DEVICE)
+    batch[4] = batch[4].to(DEVICE)
+    print(f"      → Moved all tensors to {DEVICE}")
     return batch
 
 def test(model,fp):
+    print(f"\n   🧪 [TEST] test(): Running model inference")
     with torch.no_grad():
         batch = get_data(fp)
         boundary,inside_box,rooms,attrs,triples = batch
-        model_out = model(
-            rooms, 
-            triples, 
-            boundary,
-            obj_to_img = None,
-            attributes = attrs,
-            boxes_gt= None, 
-            generate = True,
-            refine = True,
-            relative = True,
-            inside_box=inside_box
-        )
+        
+        print(f"   🔮 [TEST] Calling model forward pass...")
+        print(f"      → rooms: {rooms.shape}")
+        print(f"      → triples: {triples.shape}")
+        print(f"      → boundary: {boundary.shape}")
+        print(f"      → attrs: {attrs.shape}")
+        print(f"      → inside_box: {inside_box.shape}")
+        
+        try:
+            model_out = model(
+                rooms, 
+                triples, 
+                boundary,
+                obj_to_img = None,
+                attributes = attrs,
+                boxes_gt= None, 
+                generate = True,
+                refine = True,
+                relative = True,
+                inside_box=inside_box
+            )
+            print(f"   ✅ [TEST] Model forward pass completed")
+        except Exception as ex:
+            print(f"   ❌ [TEST] Model forward pass FAILED: {type(ex).__name__}: {ex}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
         boxes_pred,  gene_layout, boxes_refine= model_out
+        print(f"      → boxes_pred shape: {boxes_pred.shape}, dtype: {boxes_pred.dtype}")
+        print(f"      → gene_layout shape: {gene_layout.shape}, dtype: {gene_layout.dtype}")
+        print(f"      → boxes_refine shape: {boxes_refine.shape}, dtype: {boxes_refine.dtype}")
+        
         boxes_pred = boxes_pred.detach()
         boxes_pred = centers_to_extents(boxes_pred)
         boxes_refine = boxes_refine.detach()
         boxes_refine = centers_to_extents(boxes_refine)
         gene_layout = gene_layout*boundary[:,:1]
         gene_preds = torch.argmax(gene_layout.softmax(1).detach(),dim=1)
+        
+        print(f"   📦 [TEST] Post-processing complete:")
+        print(f"      → boxes_pred (after centers_to_extents): {boxes_pred.shape}")
+        print(f"      → gene_preds (after argmax): {gene_preds.shape}")
+        print(f"      → boxes_refine (after centers_to_extents): {boxes_refine.shape}")
+        
         return boxes_pred.squeeze().cpu().numpy(),gene_preds.squeeze().cpu().double().numpy(),boxes_refine.squeeze().cpu().numpy()
 
 def load_model():
-    
+
     model = Model()
-    model.cuda(0)
-    model.load_state_dict(
-        torch.load('./model/model.pth', map_location={'cuda:0': 'cuda:0'}))
+    
+    # Load model with appropriate device mapping first, then move to device
+    if torch.cuda.is_available():
+        model.load_state_dict(
+            torch.load('./model/model.pth', map_location={'cuda:0': 'cuda:0'}))
+        model.to(DEVICE)
+    else:
+        model.load_state_dict(
+            torch.load('./model/model.pth', map_location='cpu'))
+        # Don't need to move to device since model is already on CPU
+
     model.eval()
     return model
 
@@ -87,20 +134,47 @@ def get_userinfo(userRoomID,adptRoomID):
 
 
 def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
+    print(f"\n{'='*80}")
+    print(f"🔬 [TEST] get_userinfo_adjust() called")
+    print(f"{'='*80}")
+    print(f"   → userRoomID: {userRoomID}")
+    print(f"   → adptRoomID: {adptRoomID}")
+    print(f"   → NewGraph: {len(NewGraph)} elements")
+    
     global adjust,indxlist
     test_index = vw.testNameList.index(userRoomID.split(".")[0])
     test_data = vw.test_data[test_index]
+    print(f"\n   📂 [TEST] Loading test data:")
+    print(f"      → test_index: {test_index}")
+    print(f"      → test_data type: {type(test_data)}")
+    
     # boundary
     Boundary = test_data.boundary
     boundary=[[float(x),float(y),float(z),float(k)] for x,y,z,k in list(Boundary)]
+    print(f"      → Boundary shape: {Boundary.shape}")
+    print(f"      → Boundary points: {len(boundary)}")
     
+    print(f"\n   🏗️ [TEST] Creating test FloorPlan...")
     test_fp =FloorPlan(test_data)
+    print(f"      → test_fp created successfully")
 
     train_index = vw.trainNameList.index(adptRoomID.split(".")[0])
     train_data = vw.train_data[train_index]
+    print(f"\n   📂 [TEST] Loading train data:")
+    print(f"      → train_index: {train_index}")
+    print(f"      → train_data type: {type(train_data)}")
+    
+    print(f"\n   🏗️ [TEST] Creating train FloorPlan...")
     train_fp =FloorPlan(train_data,train=True)
+    print(f"      → train_fp created successfully")
+    
+    print(f"\n   🔀 [TEST] Adapting graph from train to test...")
     fp_end = test_fp.adapt_graph(train_fp)
+    print(f"      → Graph adapted successfully")
+    
+    print(f"\n   ⚙️ [TEST] Adjusting graph...")
     fp_end.adjust_graph()
+    print(f"      → Graph adjusted successfully")
 
     
     newNode = NewGraph[0]
@@ -109,7 +183,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     
     temp = []
     for newindx, newrmname, newx, newy,scalesize in newNode:
-        for type, oldrmname, oldx, oldy, oldindx in oldNode:
+        for _, oldrmname, oldx, oldy, oldindx in oldNode:
             if (int(newindx) == oldindx):
                 tmp=int(newindx), (newx - oldx), ( newy- oldy),float(scalesize)
                 temp.append(tmp)
@@ -195,31 +269,46 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
         adjust_Edge.append(tmp)
     fp_end.data.edge=np.array(adjust_Edge)
     rNode = fp_end.get_rooms(tensor=False)
+    print(f"\n   📊 [TEST] Graph structure after user adjustments:")
+    print(f"      → rNode (rooms): {rNode.shape}, values: {rNode}")
 
     rEdge = fp_end.get_triples(tensor=False)[:, [0, 2, 1]]
     Edge = [[float(u), float(v), float(type2)] for u, v, type2 in rEdge]
+    print(f"      → rEdge (edges): {rEdge.shape}")
+    print(f"      → Edge list: {len(Edge)} edges")
+    print(f"      → fp_end.data.box shape: {fp_end.data.box.shape}")
 
+    print(f"\n   🎯 [TEST] Loading model and running inference...")
     s=time.perf_counter()
     vw.loadModel()
+    print(f"      → Model loaded, vw.model type: {type(vw.model)}")
+    print(f"      → Model is on device: {next(vw.model.parameters()).device if hasattr(vw.model, 'parameters') else 'unknown'}")
+    
     boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end)
 
     e=time.perf_counter()
-    print(' model test time: %s Seconds' % (e - s))
+    print(f'\n   ⏱️ [TEST] Model inference time: {e - s:.3f} seconds')
 
+    print(f"\n   🔢 [TEST] Scaling boxes by 255...")
     boxes_pred = boxes_pred * 255
+    print(f"      → boxes_pred range: [{boxes_pred.min():.2f}, {boxes_pred.max():.2f}]")
     
     fp_end.data.gene = gene_layout
     rBox = boxes_pred[:]
     Box = [[float(x), float(y), float(z), float(k)] for x, y, z, k in rBox]
+    print(f"      → Created Box list with {len(Box)} boxes")
 
     fp_end.data.boundary =np.array(boundary)
     fp_end.data.rType =np.array(rNode).astype(int)
     fp_end.data.refineBox=np.array(Box)
     fp_end.data.rEdge=np.array(Edge)
+    print(f"      → Updated fp_end.data with predictions")
 
+    print(f"\n   🔧 [TEST] Starting box alignment...")
     startcom = time.perf_counter()
     if vw.engview is not None and HAS_MATLAB:
         # Use MATLAB alignment
+        print(f"      → Using MATLAB alignment (engview available)")
         boundary_mat = matlab.double(boundary)
         rNode_mat = matlab.double(rNode.tolist())
         print("rNode.tolist()",rNode.tolist())
@@ -233,16 +322,26 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
         box_out = box_refine[0]
         box_order = box_refine[1]
         rBoundary = box_refine[2]
+        print(f"      → MATLAB alignment completed")
     else:
         # Use Python fallback from views module
-        print("Using Python fallback for alignment")
+        print(f"      → Using Python fallback for alignment (MATLAB not available)")
         box_out, box_order, rBoundary = vw._python_fallback_align(boundary, Box, rNode.tolist(), Edge, 18)
+        print(f"      → Python alignment completed")
 
     endcom = time.perf_counter()
-    print(' alignment compute time: %s Seconds' % (endcom - startcom))
+    print(f'   ⏱️ [TEST] Alignment time: {endcom - startcom:.3f} seconds')
+    print(f"      → box_out: {len(box_out)} boxes")
+    print(f"      → box_order: {len(box_order)} entries")
+    print(f"      → rBoundary: {len(rBoundary)} room boundaries")
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]
+    
+    print(f"\n   ✅ [TEST] get_userinfo_adjust() completed successfully")
+    print(f"      → Returning: (fp_end, box_out, box_order, gene_layout, boxes_refeine)")
+    print(f"{'='*80}\n")
+    
     return fp_end,box_out,box_order, gene_layout, boxes_refeine
 
 

@@ -197,10 +197,14 @@ def loadModel():
     end = time.perf_counter()
     print('loadModel time: %s Seconds' % (end - start))
     start = time.perf_counter()
-    test = train_data[trainNameList.index("75119")]
-    mltest.test(model, FloorPlan(test, train=True))
-    end = time.perf_counter()
-    print('test Model time: %s Seconds' % (end - start))
+    # Use first available training sample for warmup, or skip if none available
+    if len(trainNameList) > 0:
+        test = train_data[0]
+        mltest.test(model, FloorPlan(test, train=True))
+        end = time.perf_counter()
+        print('test Model time: %s Seconds' % (end - start))
+    else:
+        print('Skipping model warmup - no training data available')
 
 
 def LoadTestBoundary(request):
@@ -657,22 +661,52 @@ def TransGraph(request):
 
 def AdjustGraph(request):
     start = time.perf_counter()
+    print("\n" + "="*80)
+    print("🚀 [VIEWS] AdjustGraph API called")
+    print("="*80)
+    
     # newNode index-typename-cx-cy
     # oldNode index-typename-cx-cy
     # newEdge u-v
     NewGraph = json.loads(request.GET.get("NewGraph"))
     testname = request.GET.get("userRoomID")
     trainname = request.GET.get("adptRoomID")
+    
+    print(f"📥 [VIEWS] Request Parameters:")
+    print(f"   → testname (user boundary): {testname}")
+    print(f"   → trainname (template): {trainname}")
+    print(f"   → NewGraph structure: {len(NewGraph)} elements")
+    if len(NewGraph) > 0:
+        print(f"   → NewGraph[0] (nodes): {NewGraph[0][:3] if len(NewGraph[0]) > 3 else NewGraph[0]}... ({len(NewGraph[0])} total nodes)")
+    if len(NewGraph) > 1:
+        print(f"   → NewGraph[1] (edges): {NewGraph[1][:3] if len(NewGraph[1]) > 3 else NewGraph[1]}... ({len(NewGraph[1])} total edges)")
+    
+    print(f"\n🧠 [VIEWS] Calling model inference...")
     s = time.perf_counter()
-    mlresult = mltest.get_userinfo_adjust(testname, trainname, NewGraph)
-    e = time.perf_counter()
-    print('get_userinfo_adjust: %s Seconds' % (e - s))
+    try:
+        mlresult = mltest.get_userinfo_adjust(testname, trainname, NewGraph)
+        e = time.perf_counter()
+        print(f'✅ [VIEWS] Model inference completed: {e - s:.3f} seconds')
+        print(f"   → mlresult type: {type(mlresult)}, length: {len(mlresult) if isinstance(mlresult, (list, tuple)) else 'N/A'}")
+    except Exception as ex:
+        print(f"❌ [VIEWS] Model inference FAILED: {type(ex).__name__}: {ex}")
+        import traceback
+        traceback.print_exc()
+        raise
     fp_end = mlresult[0]
     global boxes_pred
     boxes_pred = mlresult[1]
     
+    print(f"\n📦 [VIEWS] Processing model output:")
+    print(f"   → fp_end type: {type(fp_end)}")
+    print(f"   → boxes_pred shape: {boxes_pred.shape if hasattr(boxes_pred, 'shape') else len(boxes_pred)}")
+    print(f"   → boxes_pred dtype: {boxes_pred.dtype if hasattr(boxes_pred, 'dtype') else type(boxes_pred)}")
+    print(f"   → boxes_pred sample: {boxes_pred[:2] if len(boxes_pred) > 0 else 'empty'}")
+    
     data_js = {}
-    data_js["hsedge"] = (fp_end.get_triples(tensor=False)[:, [0, 2, 1]]).astype(float).tolist()
+    triples = fp_end.get_triples(tensor=False)[:, [0, 2, 1]]
+    data_js["hsedge"] = triples.astype(float).tolist()
+    print(f"   → hsedge (triples) count: {len(data_js['hsedge'])}")
   
     rooms = fp_end.get_rooms(tensor=False)
     center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in fp_end.data.box[:, :4]]
@@ -697,12 +731,12 @@ def AdjustGraph(request):
     # Get boundary for clipping
     print(f"🔍 AdjustGraph: Loading boundary for testname={testname}")
     test_index = testNameList.index(testname.split(".")[0])
-    data = test_data[test_index]
+    test_data_item = test_data[test_index]
     # Handle both mat_struct (dict-like) and object attribute access
-    data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
-    print(f"   → test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
+    data_name = test_data_item['name'] if isinstance(test_data_item, dict) or hasattr(test_data_item, '__getitem__') else (test_data_item.name if hasattr(test_data_item, 'name') else 'unknown')
+    print(f"   → test_data[{test_index}], name={data_name}, boundary shape={test_data_item.boundary.shape}, rBoundary count={len(test_data_item.rBoundary) if hasattr(test_data_item, 'rBoundary') else 'N/A'}")
 
-    external = np.asarray(data.boundary)
+    external = np.asarray(test_data_item.boundary)
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
 
@@ -728,11 +762,13 @@ def AdjustGraph(request):
             clipped_boxes_end.append([x1, y1, x2, y2])
 
     boxes_end = clipped_boxes_end
+    print(f"   → Clipped {len(boxes_end)} boxes to boundary")
 
     data_js['roomret'] = []
     for k in range(len(room)):
-        data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
-        data_js['roomret'].append(data)
+        room_data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1
+        data_js['roomret'].append(room_data)
+    print(f"   → Generated {len(data_js['roomret'])} room entries for response")
 
     # change the box size
     global relbox
@@ -740,18 +776,19 @@ def AdjustGraph(request):
     global reledge
     reledge = data_js["hsedge"]
 
+    # Use test_boundary from earlier (line 708: data = test_data[test_index])
     ex = ""
-    for i in range(len(data.boundary)):
-        ex = ex + str(data.boundary[i][0]) + "," + str(data.boundary[i][1]) + " "
+    for i in range(len(external)):
+        ex = ex + str(external[i][0]) + "," + str(external[i][1]) + " "
     data_js['exterior'] = ex
-    data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
-        data.boundary[1][0]) + "," + str(data.boundary[1][1])
+    data_js["door"] = str(external[0][0]) + "," + str(external[0][1]) + "," + str(
+        external[1][0]) + "," + str(external[1][1])
     area_ = (ymax - ymin) * (xmax - xmin)
     data_js['rmsize'] = []
     for i in range(len(data_js['roomret'])):
-        rmsize = 20 * math.sqrt((float(data_js['roomret'][i][0][2]) - float(data_js['roomret'][i][0][0])) * (
-                float(data_js['roomret'][i][0][3]) - float(data_js['roomret'][i][0][1])) / float(area_)), \
-                 data_js["roomret"][i][1][0]
+        size_value = 20 * math.sqrt((float(data_js['roomret'][i][0][2]) - float(data_js['roomret'][i][0][0])) * (
+                float(data_js['roomret'][i][0][3]) - float(data_js['roomret'][i][0][1])) / float(area_))
+        rmsize = [[size_value], [data_js["roomret"][i][1][0]]]
         data_js["rmsize"].append(rmsize)
 
     data_js["rmpos"] = []
@@ -764,14 +801,15 @@ def AdjustGraph(request):
                 y_center = int((data_js['roomret'][i][0][1] + data_js['roomret'][i][0][3]) / 2)
                 x_graph = newGraph[k][2]
                 y_graph = newGraph[k][3]
+                room_idx = int(data_js['roomret'][i][2])
                 if ((int(x_graph - 30) < x_center < int(x_graph + 30))):
-                    node = float(rooms[k]), newGraph[k][1], x_center, y_center, float(
+                    node = float(rooms[room_idx]), newGraph[k][1], x_center, y_center, float(
                         newGraph[k][0])
                     data_js["rmpos"].append(node)
                     newGraph.pop(k)
                     break
                 if ((int(y_graph - 30) < y_center < int(y_graph + 30))):
-                    node = float(rooms[k]), newGraph[k][1], x_center, y_center, float(
+                    node = float(rooms[room_idx]), newGraph[k][1], x_center, y_center, float(
                         newGraph[k][0])
                     data_js["rmpos"].append(node)
                     newGraph.pop(k)
@@ -789,15 +827,15 @@ def AdjustGraph(request):
             if isinstance(rb, np.ndarray) and len(rb) > 0:
                 coords_str = " ".join([f"{x},{y}" for x, y in rb])
                 data_js["indoor"].append(coords_str)
-    elif hasattr(data, 'rBoundary') and data.rBoundary:
+    elif hasattr(test_data_item, 'rBoundary') and test_data_item.rBoundary:
         # Fallback to test data rBoundary if generation doesn't have it
-        for rb in data.rBoundary:
+        for rb in test_data_item.rBoundary:
             if isinstance(rb, (np.ndarray, list)) and len(rb) > 0:
                 rb_array = np.array(rb) if not isinstance(rb, np.ndarray) else rb
                 coords_str = " ".join([f"{x},{y}" for x, y in rb_array])
                 data_js["indoor"].append(coords_str)
 
-    boundary = data.boundary
+    boundary = test_data_item.boundary
     
     isNew = boundary[:, 3]
     frontDoor = boundary[[0, 1]]  
@@ -833,10 +871,20 @@ def AdjustGraph(request):
             tmp = [x, y, x, h + y]
             data_js["windowsline"].append(tmp)
     
-    sio.savemat("./static/" + testname.split(',')[0].split('.')[0] + ".mat", {"data": fp_end.data})
+    mat_filename = "./static/" + testname.split(',')[0].split('.')[0] + ".mat"
+    sio.savemat(mat_filename, {"data": fp_end.data})
+    print(f"\n💾 [VIEWS] Saved floor plan data to {mat_filename}")
 
     end = time.perf_counter()
-    print('AdjustGraph time: %s Seconds' % (end - start))
+    print(f"\n✅ [VIEWS] AdjustGraph completed successfully: {end - start:.3f} seconds")
+    print(f"📤 [VIEWS] Response JSON structure:")
+    print(f"   → roomret: {len(data_js.get('roomret', []))} rooms")
+    print(f"   → hsedge: {len(data_js.get('hsedge', []))} edges")
+    print(f"   → indoor: {len(data_js.get('indoor', []))} room boundaries")
+    print(f"   → windows: {len(data_js.get('windows', []))} windows")
+    print(f"   → rmsize: {len(data_js.get('rmsize', []))} room sizes")
+    print(f"   → rmpos: {len(data_js.get('rmpos', []))} room positions")
+    print("="*80 + "\n")
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
@@ -912,7 +960,7 @@ def Save_Editbox(request):
     oldNode = NewGraph[2]
     temp = []
     for newindx, newrmname, newx, newy,scalesize in newNode:
-        for type, oldrmname, oldx, oldy, oldindx in oldNode:
+        for _, oldrmname, oldx, oldy, oldindx in oldNode:
             if (int(newindx) == oldindx):
                 tmp=int(newindx), (newx - oldx), ( newy- oldy),float(scalesize)
                 temp.append(tmp)

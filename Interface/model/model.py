@@ -41,7 +41,7 @@ class Model(nn.Module):
               # refinement_net
               refinement_dims=(1024, 512, 256, 128, 64),
               # box_refine
-              box_refine_arch = "I15,C3-64-2,C3-128-2,C3-256-2",
+              box_refine_arch = "I18,C3-64-2,C3-128-2,C3-256-2",
               roi_output_size = (8,8),
               roi_spatial_scale = 1.0/8.0,
               roi_cat_feature = True,
@@ -155,6 +155,10 @@ class Model(nn.Module):
     - boxes_gt: FloatTensor of shape (O, 4) giving boxes to use for computing
       the spatial layout; if not given then use predicted boxes.
     """
+    print(f"\n      🧠 [MODEL] forward() called")
+    print(f"         → Input shapes: objs={objs.shape}, triples={triples.shape}, boundary={boundary.shape}")
+    print(f"         → generate={generate}, refine={refine}, relative={relative}")
+    
     # input size
     O, T = objs.size(0), triples.size(0)
     s, p, o = triples.chunk(3, dim=1)           # All have shape (T, 1)
@@ -162,30 +166,45 @@ class Model(nn.Module):
     edges = torch.stack([s, o], dim=1)          # Shape is (T, 2)
     B = boundary.size(0)
     H, W = self.image_size
+    print(f"         → Computed: O={O}, T={T}, B={B}, H={H}, W={W}, edges={edges.shape}")
   
     if obj_to_img is None:
       obj_to_img = torch.zeros(O, dtype=objs.dtype, device=objs.device)
+      print(f"         → Created obj_to_img: {obj_to_img.shape}")
     
     ''' embedding '''
+    print(f"         → Step 1: Embedding objects and predicates...")
     obj_vecs = self.obj_embeddings(objs)
     pred_vecs = self.pred_embeddings(p)
+    print(f"            obj_vecs: {obj_vecs.shape}, pred_vecs: {pred_vecs.shape}")
 
     ''' attribute '''
     if attributes is not None:
+      print(f"         → Step 2: Adding attributes...")
       obj_vecs = torch.cat([obj_vecs,attributes],1)
+      print(f"            obj_vecs (with attrs): {obj_vecs.shape}")
     obj_vecs_orig = obj_vecs
     
     ''' gconv '''
+    print(f"         → Step 3: Graph convolution...")
     obj_vecs, pred_vecs = self.gconv(obj_vecs, pred_vecs, edges)
     obj_vecs, pred_vecs = self.gconv_net(obj_vecs, pred_vecs, edges)
+    print(f"            obj_vecs (after gconv): {obj_vecs.shape}")
 
     ''' inside '''
+    print(f"         → Step 4: Processing boundary with inside_cnn...")
     inside_vecs = self.inside_cnn(boundary).view(B,-1)
     obj_vecs = torch.cat([obj_vecs,inside_vecs[obj_to_img]],dim=1)
+    print(f"            inside_vecs: {inside_vecs.shape}")
+    print(f"            obj_vecs (with inside): {obj_vecs.shape}")
 
     ''' box '''
+    print(f"         → Step 5: Predicting boxes...")
     boxes_pred = self.box_net(obj_vecs)
-    if relative: boxes_pred = box_utils.box_rel2abs(boxes_pred,inside_box,obj_to_img)
+    print(f"            boxes_pred: {boxes_pred.shape}, range: [{boxes_pred.min():.4f}, {boxes_pred.max():.4f}]")
+    if relative:
+      boxes_pred = box_utils.box_rel2abs(boxes_pred,inside_box,obj_to_img)
+      print(f"            boxes_pred (abs): {boxes_pred.shape}")
 
     ''' relation '''
     # unused, for door position predition
@@ -196,22 +215,34 @@ class Model(nn.Module):
     boxes_refine = None
     layout_boxes = boxes_pred if boxes_gt is None else boxes_gt
     if generate:
+      print(f"         → Step 6: Generating layout...")
       layout_features = boxes_to_layout(obj_vecs,layout_boxes,obj_to_img,H,W)
+      print(f"            layout_features: {layout_features.shape}")
       gene_layout = self.refinement_net(layout_features)
+      print(f"            gene_layout: {gene_layout.shape}, range: [{gene_layout.min():.4f}, {gene_layout.max():.4f}]")
       
     ''' box refine '''
     if refine:
+      print(f"         → Step 7: Refining boxes...")
       gene_feat = self.box_refine_backbone(gene_layout)
+      print(f"            gene_feat: {gene_feat.shape}")
       rois = torch.cat([
         obj_to_img.float().view(-1,1),
         box_utils.centers_to_extents(layout_boxes)*H
       ],-1)
+      print(f"            rois: {rois.shape}")
       roi_feat = self.down_sample(self.roi_align(gene_feat,rois)).flatten(1)
+      print(f"            roi_feat: {roi_feat.shape}")
       roi_feat = torch.cat([
         roi_feat,
         obj_vecs
       ],-1)
       boxes_refine = self.box_reg(roi_feat)
-      if relative: boxes_refine = box_utils.box_rel2abs(boxes_refine,inside_box,obj_to_img)
+      print(f"            boxes_refine: {boxes_refine.shape}, range: [{boxes_refine.min():.4f}, {boxes_refine.max():.4f}]")
+      if relative:
+        boxes_refine = box_utils.box_rel2abs(boxes_refine,inside_box,obj_to_img)
+        print(f"            boxes_refine (abs): {boxes_refine.shape}")
 
+    print(f"      ✅ [MODEL] forward() completed")
+    print(f"         → Output: boxes_pred={boxes_pred.shape}, gene_layout={gene_layout.shape if gene_layout is not None else None}, boxes_refine={boxes_refine.shape if boxes_refine is not None else None}\n")
     return boxes_pred, gene_layout, boxes_refine

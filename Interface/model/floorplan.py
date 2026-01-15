@@ -9,16 +9,20 @@ from model.utils import *
 class FloorPlan():
 
     def __init__(self, data, train=False, rot=None):
+        print(f"      🏗️ [FLOORPLAN] __init__ called: train={train}, rot={rot}")
         self.data = copy.deepcopy(data)
         self._get_rot()
         if rot is not None:
+            print(f"         → Applying rotation transformation...")
             if train:
                 boxes = self.data.box[:, :4][:, [1, 0, 3, 2]]
                 boxes = align_box(boxes, self.rot, rot)[:, [1, 0, 3, 2]]
                 self.data.box[:, :4] = boxes
+                print(f"            Aligned boxes: {boxes.shape}")
             points = self.data.boundary[:, :2][:, [1, 0]]
             points = align_points(points, self.rot, rot)[:, [1, 0]]
             self.data.boundary[:, :2] = points
+            print(f"            Aligned boundary points: {points.shape}")
             self._get_rot()
 
     def _get_rot(self):
@@ -35,8 +39,8 @@ class FloorPlan():
         inside = np.zeros((128, 128), dtype=float)
         front = np.zeros((128, 128), dtype=float)
 
-        pts = np.concatenate([external, external[:1]]) // 2
-        pts_door = door // 2
+        pts = (np.concatenate([external, external[:1]]) // 2).astype(np.int32)
+        pts_door = (door // 2).astype(np.int32)
 
         cv2.fillPoly(inside, pts.reshape(1, -1, 2), 1.0)
         cv2.polylines(boundary, pts.reshape(1, -1, 2), True, 1.0, 3)
@@ -53,7 +57,12 @@ class FloorPlan():
         X, Y = np.linspace(0, 1, 256), np.linspace(0, 1, 256)
         x0, x1 = np.min(external[:, 0]), np.max(external[:, 0])
         y0, y1 = np.min(external[:, 1]), np.max(external[:, 1])
-        box = np.array([[X[x0], Y[y0], X[x1], Y[y1]]])
+        # Convert to integer indices and clamp to valid range [0, 255]
+        x0_idx = int(np.clip(x0, 0, 255))
+        x1_idx = int(np.clip(x1, 0, 255))
+        y0_idx = int(np.clip(y0, 0, 255))
+        y1_idx = int(np.clip(y1, 0, 255))
+        box = np.array([[X[x0_idx], Y[y0_idx], X[x1_idx], Y[y1_idx]]])
         if tensor: box = torch.tensor(box).float()
         return box
 
@@ -132,11 +141,14 @@ class FloorPlan():
         return image
 
     def get_test_data(self, tensor=True):
+        print(f"         🔍 [FLOORPLAN] get_test_data() - Preparing batch data")
         boundary = self.get_input_boundary(tensor=tensor)
         inside_box = self.get_inside_box(tensor=tensor)
         rooms = self.get_rooms(tensor=tensor)
         attrs = self.get_attributes(tensor=tensor)
         triples = self.get_triples(random=False, tensor=tensor)
+        print(f"            → boundary: {boundary.shape}, inside_box: {inside_box.shape}")
+        print(f"            → rooms: {rooms.shape}, attrs: {attrs.shape}, triples: {triples.shape}")
         return boundary, inside_box, rooms, attrs, triples
 
     def adapt_graph(self, fp_graph):
@@ -158,9 +170,11 @@ class FloorPlan():
         return fp
 
     def adjust_graph(self):
+        print(f"         🔧 [FLOORPLAN] adjust_graph() called")
         external = self.data.boundary[:, :2]
         bx0, bx1 = np.min(external[:, 0]), np.max(external[:, 0])
         by0, by1 = np.min(external[:, 1]), np.max(external[:, 1])
+        print(f"            → Boundary: x=[{bx0:.2f}, {bx1:.2f}], y=[{by0:.2f}, {by1:.2f}]")
 
         # integer indices for slicing
         bx0i = int(np.floor(bx0))

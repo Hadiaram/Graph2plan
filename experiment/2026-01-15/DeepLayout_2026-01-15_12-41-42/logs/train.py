@@ -299,8 +299,9 @@ def main(args):
         )
         boxes_pred, gene_layout, boxes_refine = model_out
         
-        # Initialize total_loss as None, will be set to first valid loss
-        total_loss = None
+        # Initialize total_loss as tensor on correct device
+        device = boxes_pred.device
+        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
         loss_items = {}
         epoch = engine.state.epoch
         step_weight = [0.1,0.5,1.0]
@@ -365,18 +366,8 @@ def main(args):
                 if torch.isnan(l) or torch.isinf(l):
                     logging.warning(f"NaN/Inf detected in {name} loss, skipping")
                 else:
-                    if total_loss is None:
-                        total_loss = l
-                    else:
-                        total_loss = total_loss + l
+                    total_loss+=l
                     loss_items[name]=l.item()
-        
-        # If all losses were None/NaN, create a zero tensor for backward
-        if total_loss is None:
-            device = boxes_pred.device
-            total_loss = torch.tensor(0.0, device=device, requires_grad=True)
-            logging.warning(f"All losses were None/NaN at epoch {epoch}, using zero loss")
-        
         loss_items['total_loss'] = total_loss.item()
 
         # Check for NaN before backward pass
@@ -414,8 +405,9 @@ def main(args):
             )
             boxes_pred, gene_layout, boxes_refine = model_out
             
-            # Initialize total_loss as None, will be set to first valid loss
-            total_loss = None
+            # Initialize total_loss as tensor on correct device
+            device = boxes_pred.device
+            total_loss = torch.tensor(0.0, device=device)
             loss_items = {}
             for name in loss:
                 l = None
@@ -471,23 +463,14 @@ def main(args):
                 if l is not None:
                     # Safety check before adding (validation)
                     if not (torch.isnan(l) or torch.isinf(l)):
-                        if total_loss is None:
-                            total_loss = l
-                        else:
-                            total_loss = total_loss + l
+                        total_loss+=l
                         loss_items[name]=l.item()
-            
-            # If all losses were None/NaN, create a zero tensor
-            if total_loss is None:
-                device = boxes_pred.device
-                total_loss = torch.tensor(0.0, device=device)
-                logging.warning(f"All losses were None/NaN during validation at epoch {engine.state.epoch}")
             
             # Final check for total_loss
             if torch.isnan(total_loss) or torch.isinf(total_loss):
-                device = boxes_pred.device
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                 logging.warning(f"NaN/Inf total_loss during validation at epoch {engine.state.epoch}, setting to 0")
-                total_loss = torch.tensor(0.0, device=device)
+                total_loss = torch.tensor(0.0).to(device)
             
             loss_items['total_loss'] = total_loss.item()
 

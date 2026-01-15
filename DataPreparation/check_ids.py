@@ -38,9 +38,9 @@ print(f"\nLast 10 IDs:")
 for i in range(max(0, len(all_ids)-10), len(all_ids)):
     print(f"  {i}: {all_ids[i]}")
 
-# Limit to 1000 samples and split 80/20
+# Use all samples and split 80/20
 random.seed(42)
-selected_ids = random.sample(all_ids, min(1000, len(all_ids)))
+selected_ids = all_ids.copy()
 random.shuffle(selected_ids)
 
 train_size = int(len(selected_ids) * 0.8)

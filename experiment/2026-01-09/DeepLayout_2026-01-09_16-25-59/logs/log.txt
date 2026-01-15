@@ -1,0 +1,161 @@
+2026-01-09 16:25:59,119 - root - INFO - python train.py --batch_size 20 --epoch 500 --learning_rate 0.0001 --workers 2 --skip_train 1 --pretrain 
+2026-01-09 16:25:59,120 - root - INFO - Namespace(dataset_dir='./data', image_size=(128, 128), input_dim=3, with_house=False, pos_dim=25, area_dim=10, batch_size=20, workers=2, train_shuffle=True, gene_layout=True, box_refine=True, embedding_dim=128, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True, gt_box=0, relative=1, mutex=1, inside=1, coverage=1, render=1, nsample=100, loss_refine=0, render_refine=0, optimizer='Adam', scheduler='plateau', learning_rate=0.0001, decay_rate=0.0001, step_size=10, step_rate=0.5, save_interval=5, n_saved=20, pretrain=None, skip_train=0, seed=74269, epoch=500, start_epoch=None, gpu='0', multi_gpu=None, suffix=None, debug=0, test=0, argv='train.py --batch_size 20 --epoch 500 --learning_rate 0.0001 --workers 2')
+2026-01-09 16:25:59,120 - root - INFO - ---------------------------------------------------TRANING---------------------------------------------------
+2026-01-09 16:25:59,120 - root - INFO - Use seed: 74269
+2026-01-09 16:25:59,463 - root - INFO - Namespace(embedding_dim=128, image_size=(128, 128), input_dim=3, attribute_dim=35, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True)
+2026-01-09 16:25:59,463 - root - INFO - Model(
+  (obj_embeddings): Embedding(18, 128)
+  (pred_embeddings): Embedding(10, 128)
+  (gconv): GraphTripleConv(
+    (net1): Sequential(
+      (0): Linear(in_features=454, out_features=512, bias=True)
+      (1): LeakyReLU(negative_slope=0.01)
+      (2): Linear(in_features=512, out_features=1152, bias=True)
+      (3): LeakyReLU(negative_slope=0.01)
+    )
+    (net2): Sequential(
+      (0): Linear(in_features=512, out_features=512, bias=True)
+      (1): LeakyReLU(negative_slope=0.01)
+      (2): Linear(in_features=512, out_features=128, bias=True)
+      (3): LeakyReLU(negative_slope=0.01)
+    )
+  )
+  (gconv_net): GraphTripleConvNet(
+    (gconvs): ModuleList(
+      (0-3): 4 x GraphTripleConv(
+        (net1): Sequential(
+          (0): Linear(in_features=384, out_features=512, bias=True)
+          (1): LeakyReLU(negative_slope=0.01)
+          (2): Linear(in_features=512, out_features=1152, bias=True)
+          (3): LeakyReLU(negative_slope=0.01)
+        )
+        (net2): Sequential(
+          (0): Linear(in_features=512, out_features=512, bias=True)
+          (1): LeakyReLU(negative_slope=0.01)
+          (2): Linear(in_features=512, out_features=128, bias=True)
+          (3): LeakyReLU(negative_slope=0.01)
+        )
+      )
+    )
+  )
+  (inside_cnn): Sequential(
+    (0): Sequential(
+      (0): Conv2d(3, 32, kernel_size=(3, 3), stride=(2, 2))
+      (1): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): LeakyReLU(negative_slope=0.01)
+      (3): Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2))
+      (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (5): LeakyReLU(negative_slope=0.01)
+      (6): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2))
+      (7): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (8): LeakyReLU(negative_slope=0.01)
+      (9): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2))
+    )
+    (1): AdaptiveAvgPool2d(output_size=1)
+  )
+  (box_net): Sequential(
+    (0): Linear(in_features=384, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=4, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+  (rel_aux_net): Sequential(
+    (0): Linear(in_features=384, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=13, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+  (refinement_net): Sequential(
+    (0): Conv2d(384, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): LeakyReLU(negative_slope=0.01)
+    (3): Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (5): LeakyReLU(negative_slope=0.01)
+    (6): Conv2d(64, 18, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  )
+  (box_refine_backbone): Sequential(
+    (0): Conv2d(18, 64, kernel_size=(3, 3), stride=(2, 2))
+    (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): LeakyReLU(negative_slope=0.01)
+    (3): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2))
+    (4): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (5): LeakyReLU(negative_slope=0.01)
+    (6): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2))
+  )
+  (roi_align): RoIAlign(output_size=(8, 8), spatial_scale=0.125, sampling_ratio=-1, aligned=False)
+  (down_sample): AdaptiveAvgPool2d(output_size=1)
+  (box_reg): Sequential(
+    (0): Linear(in_features=640, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=4, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+)
+2026-01-09 16:25:59,612 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=500.
+2026-01-09 16:26:06,140 - root - INFO - Running validation at epoch 1
+2026-01-09 16:26:06,140 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-09 16:27:00,992 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.013054965063929558, 'total_loss': 0.013054965063929558}
+2026-01-09 16:27:00,992 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.03653257929087609, 'gene_acc': 0.005995783573253192, 'box_refine_iou': 0.0018020360692141539}
+2026-01-09 16:27:00,992 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:48.483
+2026-01-09 16:27:01,007 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:54.868
+2026-01-09 16:27:01,602 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-09 16:27:01,602 - root - INFO - Train, Epoch1, Loss: {'box_mse': 0.01682368293404579, 'total_loss': 0.01682368293404579}
+2026-01-09 16:27:01,670 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:56.870
+2026-01-09 16:28:49,075 - root - INFO - Skipping validation at epoch 2 (runs every 5 epochs)
+2026-01-09 16:28:49,075 - root - INFO - Train, Epoch2, Loss: {'gene_ce': 0.17968706786632538, 'box_mse': 0.008709794841706753, 'mutex': 0.00013637721713166684, 'inside': 2.7849118851008825e-05, 'coverage': 0.00030791209428571165, 'render': 0.009850921109318733, 'total_loss': 0.19871991872787476}
+2026-01-09 16:28:51,691 - ignite.engine.engine.Engine - INFO - Epoch[2] Complete. Time taken: 00:01:50.021
+2026-01-09 16:30:35,519 - root - INFO - Skipping validation at epoch 3 (runs every 5 epochs)
+2026-01-09 16:30:35,519 - root - INFO - Train, Epoch3, Loss: {'gene_ce': 0.6135745048522949, 'box_mse': 0.010833962820470333, 'box_ref_mse': 0.0010151902679353952, 'mutex': 0.0002219254820374772, 'inside': 3.0400147807085887e-05, 'coverage': 0.00017810746794566512, 'render': 0.012984002009034157, 'total_loss': 0.6388380527496338}
+2026-01-09 16:30:37,208 - ignite.engine.engine.Engine - INFO - Epoch[3] Complete. Time taken: 00:01:45.517
+2026-01-09 16:32:17,195 - root - INFO - Skipping validation at epoch 4 (runs every 5 epochs)
+2026-01-09 16:32:17,195 - root - INFO - Train, Epoch4, Loss: {'gene_ce': 1.0444728136062622, 'box_mse': 0.016371950507164, 'box_ref_mse': 0.0050992355681955814, 'mutex': 0.0006912897806614637, 'inside': 0.00010352861136198044, 'coverage': 3.654614192782901e-05, 'render': 0.01617353782057762, 'total_loss': 1.0829488039016724}
+2026-01-09 16:32:20,013 - ignite.engine.engine.Engine - INFO - Epoch[4] Complete. Time taken: 00:01:42.805
+2026-01-09 16:34:12,208 - root - INFO - Running validation at epoch 5
+2026-01-09 16:34:12,208 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-09 16:35:28,700 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.01230965368449688, 'total_loss': 0.01230965368449688}
+2026-01-09 16:35:28,700 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.10806471833391715, 'gene_acc': 0.26000484225873827, 'box_refine_iou': 0.06285342241735895}
+2026-01-09 16:35:28,700 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:01:10.187
+2026-01-09 16:35:28,723 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:01:16.515
+2026-01-09 16:35:30,437 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-09 16:35:30,437 - root - INFO - Train, Epoch5, Loss: {'gene_ce': 0.992254912853241, 'box_mse': 0.014851627871394157, 'box_ref_mse': 0.007630411069840193, 'mutex': 0.000666762120090425, 'inside': 0.00022785158944316208, 'coverage': 7.008418469922617e-05, 'render': 0.014049386605620384, 'total_loss': 1.0297510623931885}
+2026-01-09 16:35:30,616 - ignite.engine.engine.Engine - INFO - Epoch[5] Complete. Time taken: 00:03:10.603
+2026-01-09 16:36:47,063 - root - INFO - Skipping validation at epoch 6 (runs every 5 epochs)
+2026-01-09 16:36:47,063 - root - INFO - Train, Epoch6, Loss: {'gene_ce': 0.9763087034225464, 'box_mse': 0.011919576674699783, 'box_ref_mse': 0.0068131801672279835, 'mutex': 0.0005360610666684806, 'inside': 0.00018712558085098863, 'coverage': 6.847214535810053e-05, 'render': 0.015974367037415504, 'total_loss': 1.0118074417114258}
+2026-01-09 16:36:47,848 - ignite.engine.engine.Engine - INFO - Epoch[6] Complete. Time taken: 00:01:17.232
+2026-01-09 16:37:51,363 - root - INFO - Skipping validation at epoch 7 (runs every 5 epochs)
+2026-01-09 16:37:51,363 - root - INFO - Train, Epoch7, Loss: {'gene_ce': 0.8514317274093628, 'box_mse': 0.012145948596298695, 'box_ref_mse': 0.006271759048104286, 'mutex': 0.0005741248605772853, 'inside': 0.00017359167395625263, 'coverage': 1.526086089143064e-05, 'render': 0.014349347911775112, 'total_loss': 0.884961724281311}
+2026-01-09 16:37:53,154 - ignite.engine.engine.Engine - INFO - Epoch[7] Complete. Time taken: 00:01:05.305
+2026-01-09 16:38:54,829 - root - INFO - Skipping validation at epoch 8 (runs every 5 epochs)
+2026-01-09 16:38:54,829 - root - INFO - Train, Epoch8, Loss: {'gene_ce': 0.8641425371170044, 'box_mse': 0.009994709864258766, 'box_ref_mse': 0.006671289447695017, 'mutex': 0.0003216866170987487, 'inside': 0.0001662263530306518, 'coverage': 2.9960317988297902e-05, 'render': 0.010079980827867985, 'total_loss': 0.8914064168930054}
+2026-01-09 16:38:55,547 - ignite.engine.engine.Engine - INFO - Epoch[8] Complete. Time taken: 00:01:02.393
+2026-01-09 16:40:04,557 - root - INFO - Skipping validation at epoch 9 (runs every 5 epochs)
+2026-01-09 16:40:04,557 - root - INFO - Train, Epoch9, Loss: {'gene_ce': 0.8051269054412842, 'box_mse': 0.00995418056845665, 'box_ref_mse': 0.004412059206515551, 'mutex': 0.0003569232940208167, 'inside': 0.00022815496777184308, 'coverage': 7.731094228802249e-06, 'render': 0.01166454702615738, 'total_loss': 0.8317505121231079}
+2026-01-09 16:40:05,448 - ignite.engine.engine.Engine - INFO - Epoch[9] Complete. Time taken: 00:01:09.901
+2026-01-09 16:41:06,715 - root - INFO - Running validation at epoch 10
+2026-01-09 16:41:06,715 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-09 16:42:01,851 - root - INFO - Valid, Epoch1, Loss: {'box_mse': 0.010050694458186626, 'total_loss': 0.010050694458186626}
+2026-01-09 16:42:01,851 - root - INFO - Valid, Epoch1, Metrics: {'box_iou': 0.13769436669368232, 'gene_acc': 0.35847578038851324, 'box_refine_iou': 0.06046442455715203}
+2026-01-09 16:42:01,851 - ignite.engine.engine.Engine - INFO - Epoch[1] Complete. Time taken: 00:00:48.536
+2026-01-09 16:42:01,897 - ignite.engine.engine.Engine - INFO - Engine run finished. Time taken: 00:00:55.182
+2026-01-09 16:42:04,686 - root - INFO - Validation completed, CUDA cache cleared
+2026-01-09 16:42:04,686 - root - INFO - Train, Epoch10, Loss: {'gene_ce': 0.8020824790000916, 'box_mse': 0.013015463016927242, 'box_ref_mse': 0.006316773127764463, 'mutex': 0.0004092040180694312, 'inside': 0.0003694590996019542, 'coverage': 1.03683514680597e-05, 'render': 0.014054710045456886, 'total_loss': 0.8362584114074707}
+2026-01-09 16:42:04,842 - ignite.engine.engine.Engine - INFO - Epoch[10] Complete. Time taken: 00:01:59.394
+2026-01-09 16:42:52,802 - root - INFO - Skipping validation at epoch 11 (runs every 5 epochs)
+2026-01-09 16:42:52,802 - root - INFO - Train, Epoch11, Loss: {'gene_ce': 0.8387623429298401, 'box_mse': 0.013444077223539352, 'box_ref_mse': 0.006002691574394703, 'mutex': 0.0006134302821010351, 'inside': 0.0001661292917560786, 'coverage': 1.567807157698553e-05, 'render': 0.015497074462473392, 'total_loss': 0.8745014071464539}
+2026-01-09 16:42:55,530 - ignite.engine.engine.Engine - INFO - Epoch[11] Complete. Time taken: 00:00:50.688
+2026-01-09 16:43:51,488 - root - INFO - Skipping validation at epoch 12 (runs every 5 epochs)
+2026-01-09 16:43:51,488 - root - INFO - Train, Epoch12, Loss: {'gene_ce': 0.6865273118019104, 'box_mse': 0.012465051375329494, 'box_ref_mse': 0.004601864144206047, 'mutex': 0.0005608290666714311, 'inside': 0.00023778984905220568, 'coverage': 9.613277143216692e-06, 'render': 0.014191806316375732, 'total_loss': 0.7185941934585571}
+2026-01-09 16:43:51,599 - ignite.engine.engine.Engine - INFO - Epoch[12] Complete. Time taken: 00:00:56.069
+2026-01-09 16:44:51,053 - root - INFO - Skipping validation at epoch 13 (runs every 5 epochs)
+2026-01-09 16:44:51,053 - root - INFO - Train, Epoch13, Loss: {'gene_ce': 0.8010044693946838, 'box_mse': 0.01266733929514885, 'box_ref_mse': 0.007351723965257406, 'mutex': 0.0003956287691835314, 'inside': 0.0001702102308627218, 'coverage': 3.473620017757639e-05, 'render': 0.013794943690299988, 'total_loss': 0.8354191184043884}
+2026-01-09 16:44:51,148 - ignite.engine.engine.Engine - INFO - Epoch[13] Complete. Time taken: 00:00:59.549
+2026-01-09 16:44:58,160 - root - ERROR - NaN/Inf detected in gene_layout at epoch 14
+2026-01-09 16:44:58,160 - root - WARNING - NaN/Inf detected in box_mse loss, skipping
+2026-01-09 16:44:58,160 - root - WARNING - NaN/Inf in box_ref_mse loss at epoch 14, skipping
+2026-01-09 16:44:58,185 - root - WARNING - NaN/Inf in mutex loss at epoch 14, skipping
+2026-01-09 16:44:58,191 - root - WARNING - NaN/Inf in inside loss at epoch 14, skipping
+2026-01-09 16:44:58,191 - root - WARNING - NaN/Inf in coverage loss at epoch 14, skipping
+2026-01-09 16:44:58,191 - root - WARNING - NaN/Inf in render loss at epoch 14, skipping
+2026-01-09 16:44:58,191 - ignite.engine.engine.Engine - ERROR - Current run is terminating due to exception: 'int' object has no attribute 'item'
+2026-01-09 16:44:58,539 - ignite.engine.engine.Engine - ERROR - Engine run is terminating due to exception: 'int' object has no attribute 'item'

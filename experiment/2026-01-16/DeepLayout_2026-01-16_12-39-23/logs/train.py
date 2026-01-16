@@ -304,10 +304,10 @@ def main(args):
         total_loss = None
         loss_items = {}
         epoch = engine.state.epoch
-        # Extended gradual step_weight progression to prevent NaN explosion
-        # Now 20 epochs with smaller increments and lower maximum (0.5 instead of 0.75)
-        # Epochs: 2,    3,    4,    5,    6,    7,    8,    9,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   20,   21+
-        step_weight = [0.01, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.18, 0.21, 0.24, 0.28, 0.32, 0.36, 0.40, 0.43, 0.46, 0.48, 0.50, 0.50]
+        # Even more gradual step_weight progression to prevent NaN explosion
+        # Extends from 6 epochs to 10 epochs, with smaller increments
+        # Epochs: 2,     3,     4,     5,     6,     7,     8,     9,     10,   11+
+        step_weight = [0.02, 0.05, 0.08, 0.12, 0.17, 0.23, 0.30, 0.40, 0.55, 0.75]
         for name in loss:
             l = None
             if name=='box_mse':
@@ -408,15 +408,11 @@ def main(args):
         total_loss.backward()
         
         # Compute gradient norm before clipping for monitoring
-        # Note: clip_grad_norm_ returns the UNCLIPPED total norm, but DOES apply clipping
-        # So logged grad_norm is pre-clipping (for diagnosis), but gradients ARE clipped
         total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
         
         # Log gradient norm periodically (every 100 iterations) for diagnosis
-        # If grad_norm >> max_norm, the network is under stress even with clipping active
         if engine.state.iteration % 100 == 0:
-            clip_ratio = total_norm / args.grad_clip if total_norm > 0 else 0
-            logging.info(f"Epoch {epoch}, Iter {engine.state.iteration}: grad_norm={total_norm:.4f} (clip_ratio={clip_ratio:.1f}x), loss={total_loss.item():.6f}")
+            logging.info(f"Epoch {epoch}, Iter {engine.state.iteration}: grad_norm={total_norm:.4f}, loss={total_loss.item():.6f}")
 
         
         optimizer.step()

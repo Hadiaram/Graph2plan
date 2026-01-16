@@ -1020,6 +1020,10 @@ function CreateLeftGraph(rooms, roomID) {
         }
 
         document.cookie = "RoomNum=" + ret['rmpos'].length;
+
+        // COMMENTED OUT: Automatic floor plan generation after transfer
+        // Now user must manually click "Show Plan" button to run AI model
+        /*
         NewGraph = GetEditGraph(ret['rmpos']);
         $.get("/index/AdjustGraph/", {
             'NewGraph': JSON.stringify(NewGraph),
@@ -1028,7 +1032,11 @@ function CreateLeftGraph(rooms, roomID) {
         }, function (adjust_ret) {
             // console.log("ret");
             CreateLeftPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret["door"], adjust_ret["windows"], adjust_ret["indoor"], adjust_ret["windowsline"]);
-            document.getElementById("downLoad").onclick = function () {
+        });
+        */
+
+        // downLoad button handler (moved outside of commented AJAX callback)
+        document.getElementById("downLoad").onclick = function () {
                 var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
                 if (arr = document.cookie.match(reg))
                     hsname = arr[2];
@@ -1065,8 +1073,7 @@ function CreateLeftGraph(rooms, roomID) {
                 }
 
             }
-
-        });
+        // }); // COMMENTED OUT: This was closing the automatic AdjustGraph AJAX call above
 
     });
     d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");

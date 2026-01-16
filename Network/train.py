@@ -304,9 +304,10 @@ def main(args):
         total_loss = None
         loss_items = {}
         epoch = engine.state.epoch
-        # More gradual step_weight progression to prevent NaN explosion
-        # Epochs: 2,   3,    4,    5,    6,   7+
-        step_weight = [0.05, 0.1, 0.2, 0.4, 0.7, 1.0]
+        # Even more gradual step_weight progression to prevent NaN explosion
+        # Extends from 6 epochs to 10 epochs, with smaller increments
+        # Epochs: 2,     3,     4,     5,     6,     7,     8,     9,     10,   11+
+        step_weight = [0.02, 0.05, 0.08, 0.12, 0.17, 0.23, 0.30, 0.40, 0.55, 0.75]
         for name in loss:
             l = None
             if name=='box_mse':
@@ -318,9 +319,20 @@ def main(args):
                         if torch.isnan(gene_layout).any() or torch.isinf(gene_layout).any():
                             logging.error(f"NaN/Inf detected in gene_layout at epoch {epoch}")
                             continue
-                        # Use gradual step_weight: epochs 2-7 map to indices 0-5, then stay at index 5 (weight=1.0)
+                        
+                        # Early warning: check for extreme values that might lead to NaN
+                        gene_max = gene_layout.abs().max().item()
+                        if gene_max > 50.0:
+                            logging.warning(f"Large gene_layout values detected at epoch {epoch}: max={gene_max:.2f}")
+                        
+                        # Use gradual step_weight: now extends to 10 epochs
                         weight_idx = min(epoch-2, len(step_weight)-1)
-                        l = step_weight[weight_idx]*loss[name](gene_layout,layout)
+                        current_weight = step_weight[weight_idx]
+                        l = current_weight * loss[name](gene_layout,layout)
+                        
+                        # Log gene_ce contribution periodically
+                        if engine.state.iteration % 100 == 0:
+                            logging.info(f"Epoch {epoch}, gene_ce loss: {loss[name](gene_layout,layout).item():.4f}, weight: {current_weight:.2f}, contribution: {l.item():.4f}")
                     elif name=='mutex':
                         l = 0.1*loss[name](boxes_pred,obj_to_img,objs)
                         if torch.isnan(l) or torch.isinf(l):
@@ -395,8 +407,13 @@ def main(args):
         
         total_loss.backward()
         
-        # Clip gradients to prevent explosion - configurable via --grad_clip argument
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
+        # Compute gradient norm before clipping for monitoring
+        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
+        
+        # Log gradient norm periodically (every 100 iterations) for diagnosis
+        if engine.state.iteration % 100 == 0:
+            logging.info(f"Epoch {epoch}, Iter {engine.state.iteration}: grad_norm={total_norm:.4f}, loss={total_loss.item():.6f}")
+
         
         optimizer.step()
         return loss_items

@@ -8,6 +8,7 @@ var createNewLine = false;
 var isTrans = 0;
 var islLoadTest = 0;
 var selectRect;
+var dragging_circle = null; // Track the currently dragging circle
 var startRectvalue = [-1, -1, -1, -1];
 var startPoint = [-1, -1, -1, -1, -1];
 var RelRectvalue = [];
@@ -101,6 +102,16 @@ function start() {
         console.timeEnd('time')
 
     })
+
+    // Document-level handlers for smooth circle dragging
+    $(document).on('mousemove', function(e) {
+        circle_mousemove(e);
+    });
+
+    $(document).on('mouseup', function(e) {
+        circle_mouseup();
+    });
+
     animateHeight(true);
     animateHeight1(true);
     animateHeight2(true);
@@ -384,8 +395,6 @@ function CreateCircle(cx, cy, id, r) {
         .attr("id", id)
         .attr("class", "TransCircle")
         .on("mousedown", circle_mousedown)
-        .on("mousemove", circle_mousemove)
-        .on("mouseup", circle_mouseup)
         .on("dblclick", circle_dblclick)
         .append("title")//此处加入title标签
         .text(title);
@@ -1173,6 +1182,7 @@ function circle_mousedown() {
     }
 
     focus_circle = true;
+    dragging_circle = this; // Store reference to the circle being dragged
     var points = d3.select("body").select("#LeftGraphSVG").selectAll("circle").attr("stroke", "#000000").attr("stroke-width", 2);
     var selectPoint = d3.select("body").select("#LeftGraphSVG").select("#" + this.id).attr("stroke", "rgba(0,0,0,0.56)").attr("stroke-width", 2);
     var isDelete = document.querySelector('#isDelete');
@@ -1279,34 +1289,34 @@ function hasLine(id) {
     return false;
 }
 
-function circle_mousemove() {
+function circle_mousemove(event) {
 
     console.log("Move!");
 
-    if (focus_circle) {
+    if (focus_circle && dragging_circle) {
         var leftsvg = document.getElementById('LeftGraphSVG');
-        let newX = d3.event.x - leftsvg.getBoundingClientRect().left;
-        let newY = d3.event.y - leftsvg.getBoundingClientRect().top;
+        let newX = event.clientX - leftsvg.getBoundingClientRect().left;
+        let newY = event.clientY - leftsvg.getBoundingClientRect().top;
 
         // console.log(newX + " " + newY)
 
         var transLines = d3.select("body").select("#LeftGraphSVG").selectAll(".TransLine");
 
-        var pointID = (this.id).split("_")[1];
+        var pointID = (dragging_circle.id).split("_")[1];
 
         transLines.each(function (d, i) {
             var tmp_array = (this.id).split("_");
 
             if (tmp_array[1] == pointID) {
-                d3.select(this).attr("x1", newX / 2).attr("y1", newY / 2);
+                d3.select(this).attr("x1", newX / 1.5).attr("y1", newY / 1.5);
             }
             if (tmp_array[2] == pointID) {
-                d3.select(this).attr("x2", newX / 2).attr("y2", newY / 2);
+                d3.select(this).attr("x2", newX / 1.5).attr("y2", newY / 1.5);
             }
         })
 
-        var selectPoint = d3.select("body").select("#LeftGraphSVG").select("#" + this.id)
-            .attr("cx", newX / 2).attr("cy", newY / 2);
+        var selectPoint = d3.select("body").select("#LeftGraphSVG").select("#" + dragging_circle.id)
+            .attr("cx", newX / 1.5).attr("cy", newY / 1.5);
         adjust_graph = true;
         // console.log(adjust_graph, "adjust")
     }
@@ -1314,6 +1324,7 @@ function circle_mousemove() {
 
 function circle_mouseup() {
     focus_circle = false;
+    dragging_circle = null;
 }
 
 function circle_dblclick() {

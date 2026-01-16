@@ -76,11 +76,10 @@ def parse_args():
     ''' Optimizer '''
     parser.add_argument('--optimizer',default='Adam',type=str)
     parser.add_argument('--scheduler',default='plateau',type=str)
-    parser.add_argument('--learning_rate', default=5e-5, type=float)  # Reduced from 1e-4 to prevent NaN explosion
+    parser.add_argument('--learning_rate', default=1e-4, type=float)
     parser.add_argument('--decay_rate', default=1e-4, type=float)
     parser.add_argument('--step_size', default=10, type=float)
     parser.add_argument('--step_rate', default=0.5, type=float)
-    parser.add_argument('--grad_clip', default=1.0, type=float)  # Gradient clipping max norm
 
     ''' Checkpoints '''
     parser.add_argument('--save_interval', default=5, type=int)
@@ -304,9 +303,7 @@ def main(args):
         total_loss = None
         loss_items = {}
         epoch = engine.state.epoch
-        # More gradual step_weight progression to prevent NaN explosion
-        # Epochs: 2,   3,    4,    5,    6,   7+
-        step_weight = [0.05, 0.1, 0.2, 0.4, 0.7, 1.0]
+        step_weight = [0.1,0.5,1.0]
         for name in loss:
             l = None
             if name=='box_mse':
@@ -318,9 +315,7 @@ def main(args):
                         if torch.isnan(gene_layout).any() or torch.isinf(gene_layout).any():
                             logging.error(f"NaN/Inf detected in gene_layout at epoch {epoch}")
                             continue
-                        # Use gradual step_weight: epochs 2-7 map to indices 0-5, then stay at index 5 (weight=1.0)
-                        weight_idx = min(epoch-2, len(step_weight)-1)
-                        l = step_weight[weight_idx]*loss[name](gene_layout,layout)
+                        l = step_weight[epoch-2 if epoch<=3 else -1]*loss[name](gene_layout,layout)
                     elif name=='mutex':
                         l = 0.1*loss[name](boxes_pred,obj_to_img,objs)
                         if torch.isnan(l) or torch.isinf(l):
@@ -360,10 +355,7 @@ def main(args):
                 
                 if epoch>2:
                     if name=='box_ref_mse':
-                        # Start box_ref_mse from epoch 3, use same gradual weights
-                        # Epochs 3-8 map to step_weight indices 0-5
-                        weight_idx = min(epoch-3, len(step_weight)-1)
-                        l = step_weight[weight_idx]*loss[name](boxes_refine,boxes)
+                        l = step_weight[epoch-3 if epoch<=4 else -1]*loss[name](boxes_refine,boxes)
                         if torch.isnan(l) or torch.isinf(l):
                             logging.warning(f"NaN/Inf in box_ref_mse loss at epoch {epoch}, skipping")
                             l = None
@@ -395,8 +387,8 @@ def main(args):
         
         total_loss.backward()
         
-        # Clip gradients to prevent explosion - configurable via --grad_clip argument
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
+        # Clip gradients to prevent explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         
         optimizer.step()
         return loss_items

@@ -60,6 +60,11 @@ def _python_fallback_align(boundary, boxes, types, edges, threshold):
 
             # Balconies (type 9) should extend outside - don't clip them
             if i < len(types) and int(types[i]) == 9:
+                # Balconies can extend outside, but coordinates must be ordered correctly
+                if x2 <= x1:
+                    x2 = x1 + 10
+                if y2 <= y1:
+                    y2 = y1 + 10
                 clipped_boxes.append([x1, y1, x2, y2])
             else:
                 # Clip to boundary limits
@@ -546,7 +551,13 @@ def FindTraindata(trainname):
     for x1, y1, x2, y2, cate in data.box[:]:
         # Balconies (type 9) should extend outside - don't clip them
         if int(cate) == 9:
-            hsbox.append([[float(x1), float(y1), float(x2), float(y2)], [mdul.room_label[int(cate)][1]]])
+            # Balconies can extend outside, but coordinates must be ordered correctly
+            x1_bal, y1_bal, x2_bal, y2_bal = float(x1), float(y1), float(x2), float(y2)
+            if x2_bal <= x1_bal:
+                x2_bal = x1_bal + 10
+            if y2_bal <= y1_bal:
+                y2_bal = y1_bal + 10
+            hsbox.append([[x1_bal, y1_bal, x2_bal, y2_bal], [mdul.room_label[int(cate)][1]]])
         else:
             # Clip to boundary limits
             x1_clipped = max(xmin + margin, min(float(x1), xmax - margin))
@@ -747,6 +758,11 @@ def AdjustGraph(request):
         x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
         # Balconies (type 9) should extend outside - don't clip them
         if int(room[i]) == 9:
+            # Balconies can extend outside, but coordinates must be ordered correctly
+            if x2 <= x1:
+                x2 = x1 + 10
+            if y2 <= y1:
+                y2 = y1 + 10
             clipped_boxes_end.append([x1, y1, x2, y2])
         else:
             # Clip to boundary limits

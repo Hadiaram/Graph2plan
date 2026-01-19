@@ -81,19 +81,34 @@ def test(model,fp):
         print(f"      → boxes_pred shape: {boxes_pred.shape}, dtype: {boxes_pred.dtype}")
         print(f"      → gene_layout shape: {gene_layout.shape}, dtype: {gene_layout.dtype}")
         print(f"      → boxes_refine shape: {boxes_refine.shape}, dtype: {boxes_refine.dtype}")
-        
+
         boxes_pred = boxes_pred.detach()
+        print(f"      → boxes_pred [xc,yc,w,h] stats:")
+        print(f"         xc: min={boxes_pred[:, 0].min():.4f}, max={boxes_pred[:, 0].max():.4f}")
+        print(f"         yc: min={boxes_pred[:, 1].min():.4f}, max={boxes_pred[:, 1].max():.4f}")
+        print(f"         w:  min={boxes_pred[:, 2].min():.4f}, max={boxes_pred[:, 2].max():.4f}")
+        print(f"         h:  min={boxes_pred[:, 3].min():.4f}, max={boxes_pred[:, 3].max():.4f}")
         boxes_pred = centers_to_extents(boxes_pred)
+
         boxes_refine = boxes_refine.detach()
+        print(f"      → boxes_refine [xc,yc,w,h] stats:")
+        print(f"         xc: min={boxes_refine[:, 0].min():.4f}, max={boxes_refine[:, 0].max():.4f}")
+        print(f"         yc: min={boxes_refine[:, 1].min():.4f}, max={boxes_refine[:, 1].max():.4f}")
+        print(f"         w:  min={boxes_refine[:, 2].min():.4f}, max={boxes_refine[:, 2].max():.4f}")
+        print(f"         h:  min={boxes_refine[:, 3].min():.4f}, max={boxes_refine[:, 3].max():.4f}")
         boxes_refine = centers_to_extents(boxes_refine)
         gene_layout = gene_layout*boundary[:,:1]
         gene_preds = torch.argmax(gene_layout.softmax(1).detach(),dim=1)
         
         print(f"   📦 [TEST] Post-processing complete:")
-        print(f"      → boxes_pred (after centers_to_extents): {boxes_pred.shape}")
+        print(f"      → boxes_pred (after centers_to_extents) [x0,y0,x1,y1]: {boxes_pred.shape}")
+        print(f"         x0: min={boxes_pred[:, 0].min():.4f}, max={boxes_pred[:, 0].max():.4f}")
+        print(f"         y0: min={boxes_pred[:, 1].min():.4f}, max={boxes_pred[:, 1].max():.4f}")
+        print(f"         x1: min={boxes_pred[:, 2].min():.4f}, max={boxes_pred[:, 2].max():.4f}")
+        print(f"         y1: min={boxes_pred[:, 3].min():.4f}, max={boxes_pred[:, 3].max():.4f}")
         print(f"      → gene_preds (after argmax): {gene_preds.shape}")
         print(f"      → boxes_refine (after centers_to_extents): {boxes_refine.shape}")
-        
+
         return boxes_pred.squeeze().cpu().numpy(),gene_preds.squeeze().cpu().double().numpy(),boxes_refine.squeeze().cpu().numpy()
 
 def load_model():
@@ -290,11 +305,14 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     print(f'\n   ⏱️ [TEST] Model inference time: {e - s:.3f} seconds')
 
     print(f"\n   🔢 [TEST] Scaling boxes by 255...")
-    boxes_pred = boxes_pred * 255
-    print(f"      → boxes_pred range: [{boxes_pred.min():.2f}, {boxes_pred.max():.2f}]")
-    
+    print(f"      ⚠️  boxes_pred has negative widths, using boxes_refeine instead")
+    boxes_refeine = boxes_refeine * 255
+    print(f"      → boxes_refeine range: [{boxes_refeine.min():.2f}, {boxes_refeine.max():.2f}]")
+    print(f"      → boxes_refeine widths:  min={(boxes_refeine[:, 2] - boxes_refeine[:, 0]).min():.2f}, max={(boxes_refeine[:, 2] - boxes_refeine[:, 0]).max():.2f}")
+    print(f"      → boxes_refeine heights: min={(boxes_refeine[:, 3] - boxes_refeine[:, 1]).min():.2f}, max={(boxes_refeine[:, 3] - boxes_refeine[:, 1]).max():.2f}")
+
     fp_end.data.gene = gene_layout
-    rBox = boxes_pred[:]
+    rBox = boxes_refeine[:]
     Box = [[float(x), float(y), float(z), float(k)] for x, y, z, k in rBox]
     print(f"      → Created Box list with {len(Box)} boxes")
 

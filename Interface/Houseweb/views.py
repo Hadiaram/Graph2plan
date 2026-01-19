@@ -764,6 +764,24 @@ def AdjustGraph(request):
     boxes_end = clipped_boxes_end
     print(f"   → Clipped {len(boxes_end)} boxes to boundary")
 
+    # Sort rooms by area (largest first) to ensure proper layering
+    # Larger rooms rendered first (behind), smaller rooms last (on top)
+    room_sizes = []
+    for k in range(len(boxes_end)):
+        x1, y1, x2, y2 = boxes_end[k][0], boxes_end[k][1], boxes_end[k][2], boxes_end[k][3]
+        area = (x2 - x1) * (y2 - y1)
+        # Store (area, original_index, box, room_type, box_order_entry)
+        room_sizes.append((area, k, boxes_end[k], room[k], box_order[k]))
+
+    # Sort by area (descending - largest first)
+    room_sizes.sort(key=lambda x: x[0], reverse=True)
+
+    # Rebuild arrays in sorted order (maintaining parallel structure)
+    boxes_end = [item[2] for item in room_sizes]
+    room = [item[3] for item in room_sizes]
+    box_order = [item[4] for item in room_sizes]
+    print(f"   → Sorted {len(boxes_end)} rooms by area for proper layering")
+
     data_js['roomret'] = []
     for k in range(len(room)):
         room_data = boxes_end[k], [mdul.room_label[int(room[k])][1]], box_order[k][0] - 1

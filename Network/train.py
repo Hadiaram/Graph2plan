@@ -293,7 +293,7 @@ def main(args):
             obj_to_img = obj_to_img,
             attributes=attrs,
             boxes_gt= boxes if args.gt_box else None, 
-            generate = args.gene_layout and engine.state.epoch>1,
+            generate = args.gene_layout,  # Generate from epoch 1 for gradual training
             refine = args.box_refine and engine.state.epoch>2,
             relative = args.relative,
             inside_box=inside_box if args.relative else None,
@@ -305,80 +305,83 @@ def main(args):
         loss_items = {}
         epoch = engine.state.epoch
         # Extended gradual step_weight progression to prevent NaN explosion
-        # Now 20 epochs with smaller increments and lower maximum (0.5 instead of 0.75)
-        # Epochs: 2,    3,    4,    5,    6,    7,    8,    9,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   20,   21+
-        step_weight = [0.01, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.18, 0.21, 0.24, 0.28, 0.32, 0.36, 0.40, 0.43, 0.46, 0.48, 0.50, 0.50]
+        # Now 21 epochs starting from epoch 1 with even smaller initial weight (0.005)
+        # Epochs: 1,     2,    3,    4,    5,    6,    7,    8,    9,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   20,   21+
+        step_weight = [0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.18, 0.21, 0.24, 0.28, 0.32, 0.36, 0.40, 0.43, 0.46, 0.48, 0.50, 0.50]
         for name in loss:
             l = None
             if name=='box_mse':
                 l = loss[name](boxes_pred,boxes)
-            else:
-                if epoch>1:
-                    if name=='gene_ce':
-                        # Check for NaN in gene_layout before computing loss
-                        if torch.isnan(gene_layout).any() or torch.isinf(gene_layout).any():
-                            logging.error(f"NaN/Inf detected in gene_layout at epoch {epoch}")
-                            continue
-                        
-                        # Early warning: check for extreme values that might lead to NaN
-                        gene_max = gene_layout.abs().max().item()
-                        if gene_max > 50.0:
-                            logging.warning(f"Large gene_layout values detected at epoch {epoch}: max={gene_max:.2f}")
-                        
-                        # Use gradual step_weight: now extends to 10 epochs
-                        weight_idx = min(epoch-2, len(step_weight)-1)
-                        current_weight = step_weight[weight_idx]
-                        l = current_weight * loss[name](gene_layout,layout)
-                        
-                        # Log gene_ce contribution periodically
-                        if engine.state.iteration % 100 == 0:
-                            logging.info(f"Epoch {epoch}, gene_ce loss: {loss[name](gene_layout,layout).item():.4f}, weight: {current_weight:.2f}, contribution: {l.item():.4f}")
-                    elif name=='mutex':
-                        l = 0.1*loss[name](boxes_pred,obj_to_img,objs)
-                        if torch.isnan(l) or torch.isinf(l):
-                            logging.warning(f"NaN/Inf in mutex loss at epoch {epoch}, skipping")
-                            l = None
-                        elif args.box_refine and args.loss_refine and epoch>2: 
-                            l_refine = loss[name](boxes_refine,obj_to_img,objs)
-                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
-                                l += l_refine
-                    elif name=='inside':
-                        l = 0.1*loss[name](boxes_pred,inside_box,obj_to_img)
-                        if torch.isnan(l) or torch.isinf(l):
-                            logging.warning(f"NaN/Inf in inside loss at epoch {epoch}, skipping")
-                            l = None
-                        elif args.box_refine and args.loss_refine and epoch>2:
-                            l_refine = loss[name](boxes_refine,inside_box,obj_to_img)
-                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
-                                l += l_refine
-                    elif name=='coverage':
-                        l = 0.1*loss[name](boxes_pred,inside_coords,obj_to_img)
-                        if torch.isnan(l) or torch.isinf(l):
-                            logging.warning(f"NaN/Inf in coverage loss at epoch {epoch}, skipping")
-                            l = None
-                        elif args.box_refine and args.loss_refine and epoch>2:
-                            l_refine = loss[name](boxes_refine,inside_coords,obj_to_img)
-                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
-                                l += l_refine
-                    elif name=='render':
-                        l = loss[name](boxes_pred,boxes)
-                        if torch.isnan(l) or torch.isinf(l):
-                            logging.warning(f"NaN/Inf in render loss at epoch {epoch}, skipping")
-                            l = None
-                        elif args.box_refine and args.loss_refine and epoch>2:
-                            l_refine = loss[name](boxes_refine,boxes)
-                            if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
-                                l += l_refine
+            elif name=='gene_ce':
+                # Gene_ce now starts from epoch 1 with very small weight (0.005)
+                # This ensures refinement_net gets gradients from the start
                 
-                if epoch>2:
-                    if name=='box_ref_mse':
-                        # Start box_ref_mse from epoch 3, use same gradual weights
-                        # Epochs 3-8 map to step_weight indices 0-5
-                        weight_idx = min(epoch-3, len(step_weight)-1)
-                        l = step_weight[weight_idx]*loss[name](boxes_refine,boxes)
-                        if torch.isnan(l) or torch.isinf(l):
-                            logging.warning(f"NaN/Inf in box_ref_mse loss at epoch {epoch}, skipping")
-                            l = None
+                # Skip if gene_layout wasn't generated
+                if gene_layout is None:
+                    continue
+                    
+                # Check for NaN in gene_layout before computing loss
+                if torch.isnan(gene_layout).any() or torch.isinf(gene_layout).any():
+                    logging.error(f"NaN/Inf detected in gene_layout at epoch {epoch}")
+                    continue
+                
+                # Early warning: check for extreme values that might lead to NaN
+                gene_max = gene_layout.abs().max().item()
+                if gene_max > 50.0:
+                    logging.warning(f"Large gene_layout values detected at epoch {epoch}: max={gene_max:.2f}")
+                
+                # Use gradual step_weight starting from epoch 1 (21 epochs total)
+                weight_idx = min(epoch-1, len(step_weight)-1)
+                current_weight = step_weight[weight_idx]
+                l = current_weight * loss[name](gene_layout,layout)
+                
+                # Log gene_ce contribution periodically
+                if engine.state.iteration % 100 == 0:
+                    logging.info(f"Epoch {epoch}, gene_ce loss: {loss[name](gene_layout,layout).item():.4f}, weight: {current_weight:.2f}, contribution: {l.item():.4f}")
+            elif name=='mutex':
+                l = 0.1*loss[name](boxes_pred,obj_to_img,objs)
+                if torch.isnan(l) or torch.isinf(l):
+                    logging.warning(f"NaN/Inf in mutex loss at epoch {epoch}, skipping")
+                    l = None
+                elif args.box_refine and args.loss_refine and epoch>2: 
+                    l_refine = loss[name](boxes_refine,obj_to_img,objs)
+                    if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                        l += l_refine
+            elif name=='inside':
+                l = 0.1*loss[name](boxes_pred,inside_box,obj_to_img)
+                if torch.isnan(l) or torch.isinf(l):
+                    logging.warning(f"NaN/Inf in inside loss at epoch {epoch}, skipping")
+                    l = None
+                elif args.box_refine and args.loss_refine and epoch>2:
+                    l_refine = loss[name](boxes_refine,inside_box,obj_to_img)
+                    if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                        l += l_refine
+            elif name=='coverage':
+                l = 0.1*loss[name](boxes_pred,inside_coords,obj_to_img)
+                if torch.isnan(l) or torch.isinf(l):
+                    logging.warning(f"NaN/Inf in coverage loss at epoch {epoch}, skipping")
+                    l = None
+                elif args.box_refine and args.loss_refine and epoch>2:
+                    l_refine = loss[name](boxes_refine,inside_coords,obj_to_img)
+                    if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                        l += l_refine
+            elif name=='render':
+                l = loss[name](boxes_pred,boxes)
+                if torch.isnan(l) or torch.isinf(l):
+                    logging.warning(f"NaN/Inf in render loss at epoch {epoch}, skipping")
+                    l = None
+                elif args.box_refine and args.loss_refine and epoch>2:
+                    l_refine = loss[name](boxes_refine,boxes)
+                    if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
+                        l += l_refine
+            elif name=='box_ref_mse' and epoch>2:
+                # Start box_ref_mse from epoch 3, use same gradual weights
+                # Map to step_weight starting from epoch 3 (index 2 in the array)
+                weight_idx = min(epoch-1, len(step_weight)-1)  # Use same progression as gene_ce
+                l = step_weight[weight_idx]*loss[name](boxes_refine,boxes)
+                if torch.isnan(l) or torch.isinf(l):
+                    logging.warning(f"NaN/Inf in box_ref_mse loss at epoch {epoch}, skipping")
+                    l = None
 
             if l is not None:
                 # Final safety check before adding to total

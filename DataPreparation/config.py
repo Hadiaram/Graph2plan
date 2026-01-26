@@ -2,4 +2,4 @@
 # data_path = '../Network/data/data.mat'
 
 # Custom ResPlan dataset path
-data_path = r'C:\Users\hmbashir\source\Graph2plan\DataPreparation\data\data.mat'
+data_path = r'C:\Users\hmbashir\AI Training\Graph2Plan\DataPreparation\data\data.mat'

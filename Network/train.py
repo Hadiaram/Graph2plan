@@ -170,10 +170,19 @@ def get_scheduler(optimizer,args):
 def get_losses(args):
     loss = {}
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    weight = torch.ones(18).to(device)
-    weight[13]=weight[14]=0 # ignore External and ExteriorWall categories (not used in ResPlan)
+    
+    # Get vocabulary to determine number of classes
+    vocab = get_vocab()
+    num_classes = len(vocab['object_idx_to_name'])
+    
+    # Create weight tensor for the actual number of classes (after balcony removal: 5 classes)
+    weight = torch.ones(num_classes).to(device)
+    # Note: No need to zero out External/ExteriorWall as they were removed with balconies
+    
     if args.gene_layout: 
-        loss['gene_ce'] = torch.nn.CrossEntropyLoss(weight=weight)
+        # Use ignore_index for background/boundary pixels that are outside valid room indices
+        # Background is set to num_classes (5), boundary to num_classes+1 (6)
+        loss['gene_ce'] = torch.nn.CrossEntropyLoss(weight=weight, ignore_index=num_classes)
     loss['box_mse'] = torch.nn.SmoothL1Loss()
     if args.box_refine:
         loss['box_ref_mse'] = torch.nn.SmoothL1Loss()
@@ -270,6 +279,20 @@ def main(args):
     print(f"Using device: {device}")
     model.to(device)
 
+    def check_tensor_for_nan(tensor, name, epoch, iteration):
+        """Helper function to detect NaN/Inf in tensors and log details."""
+        if tensor is None:
+            return False
+        if torch.isnan(tensor).any():
+            logging.error(f"NaN detected in {name} at epoch {epoch}, iter {iteration}")
+            logging.error(f"  Shape: {tensor.shape}, Min: {tensor[~torch.isnan(tensor)].min().item() if (~torch.isnan(tensor)).any() else 'all NaN'}, Max: {tensor[~torch.isnan(tensor)].max().item() if (~torch.isnan(tensor)).any() else 'all NaN'}")
+            return True
+        if torch.isinf(tensor).any():
+            logging.error(f"Inf detected in {name} at epoch {epoch}, iter {iteration}")
+            logging.error(f"  Shape: {tensor.shape}, Num Inf: {torch.isinf(tensor).sum().item()}")
+            return True
+        return False
+
     def update(engine,batch):
         model.train()
         
@@ -285,6 +308,18 @@ def main(args):
         boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
 
         if args.relative: boxes = box_rel2abs(boxes,inside_box,obj_to_img)
+        
+        # CRITICAL: Check input data for NaN/Inf before model forward
+        iteration = engine.state.iteration
+        has_bad_input = False
+        has_bad_input |= check_tensor_for_nan(boundary, "boundary", epoch, iteration)
+        has_bad_input |= check_tensor_for_nan(inside_box, "inside_box", epoch, iteration)
+        has_bad_input |= check_tensor_for_nan(boxes, "boxes", epoch, iteration)
+        has_bad_input |= check_tensor_for_nan(attrs, "attrs", epoch, iteration)
+        
+        if has_bad_input:
+            logging.error(f"Skipping batch due to bad input data")
+            return {'total_loss': 0.0}
 
         model_out = model(
             objs, 
@@ -300,14 +335,24 @@ def main(args):
         )
         boxes_pred, gene_layout, boxes_refine = model_out
         
+        # CRITICAL: Check model outputs for NaN/Inf
+        has_bad_output = False
+        has_bad_output |= check_tensor_for_nan(boxes_pred, "boxes_pred", epoch, iteration)
+        has_bad_output |= check_tensor_for_nan(gene_layout, "gene_layout", epoch, iteration)
+        has_bad_output |= check_tensor_for_nan(boxes_refine, "boxes_refine", epoch, iteration)
+        
+        if has_bad_output:
+            logging.error(f"NaN/Inf in model output - skipping batch to prevent gradient corruption")
+            return {'total_loss': 0.0}
+        
         # Initialize total_loss as None, will be set to first valid loss
         total_loss = None
         loss_items = {}
         epoch = engine.state.epoch
-        # Extended gradual step_weight progression to prevent NaN explosion
-        # Now 21 epochs starting from epoch 1 with even smaller initial weight (0.005)
-        # Epochs: 1,     2,    3,    4,    5,    6,    7,    8,    9,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   20,   21+
-        step_weight = [0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.18, 0.21, 0.24, 0.28, 0.32, 0.36, 0.40, 0.43, 0.46, 0.48, 0.50, 0.50]
+        # Even more gradual step_weight progression to prevent NaN at epoch 7
+        # Extended to 31 epochs with smaller increments around the problematic epoch 7 range
+        # Epochs: 1,     2,    3,    4,    5,    6,    7,    8,    9,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   20,   21,   22,   23,   24,   25,   26,   27,   28,   29,   30,   31+
+        step_weight = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.50]
         for name in loss:
             l = None
             if name=='box_mse':
@@ -429,6 +474,21 @@ def main(args):
         model.eval()
         with torch.no_grad():
             boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
+
+            # CRITICAL: Validate room indices in validation data
+            if (objs >= 5).any() or (objs < 0).any():
+                logging.warning(f"Invalid room indices in validation batch objs: {objs[objs >= 5].tolist() if (objs >= 5).any() else 'none'}")
+                logging.warning(f"Batch name: {name}")
+                # Skip this batch
+                return {'total_loss': 0.0}
+            
+            # CRITICAL: Validate layout tensor
+            if (layout > 5).any() or (layout < 0).any():
+                invalid_vals = layout[(layout > 5) | (layout < 0)].unique().tolist()
+                logging.warning(f"Invalid layout indices in validation batch: {invalid_vals}")
+                logging.warning(f"Batch name: {name}")
+                # Clamp layout to valid range
+                layout = torch.clamp(layout, 0, 5)
 
             if args.relative: boxes = box_rel2abs(boxes,inside_box,obj_to_img)
 
@@ -571,17 +631,42 @@ def main(args):
 
     @trainer.on(Events.EPOCH_COMPLETED)  # type: ignore
     def evaluate(engine):
+        # TEMPORARY FIX: Skip validation because data_valid.mat has old vocabulary
+        # TODO: Regenerate data_valid.mat with balconies removed (matching data_train.mat from Jan 19)
+        logging.info(f"Epoch {engine.state.epoch} completed - SKIPPING validation (data_valid.mat has old vocabulary)")
+        
+        # Original validation code (commented out until data_valid.mat is regenerated):
+        """
         # Run validation only every 5 epochs to save time
         if engine.state.epoch % 5 == 0 or engine.state.epoch == 1:
             logging.info(f"Running validation at epoch {engine.state.epoch}")
-            valid_evaluator.run(valid_loader)
-            # Clear CUDA cache after validation to prevent memory accumulation
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-            logging.info(f"Validation completed, CUDA cache cleared")
+            try:
+                # Clear CUDA cache before validation to prevent memory issues
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                
+                valid_evaluator.run(valid_loader)
+                
+                # Clear CUDA cache after validation to prevent memory accumulation
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                logging.info(f"Validation completed, CUDA cache cleared")
+            except RuntimeError as e:
+                if "cuDNN" in str(e) or "CUDA" in str(e):
+                    logging.error(f"CUDA/cuDNN error during validation at epoch {engine.state.epoch}: {e}")
+                    logging.warning("Skipping validation this epoch and clearing CUDA cache")
+                    # Force clear CUDA cache and reset
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        torch.cuda.reset_peak_memory_stats()
+                else:
+                    raise
         else:
             logging.info(f"Skipping validation at epoch {engine.state.epoch} (runs every 5 epochs)")
+        """
 
     # Metrics
     MetricAverage(output_transform=lambda output:iou(output['pred'][0],output['gt'][1])).attach(valid_evaluator,'box_iou')
@@ -628,7 +713,11 @@ def main(args):
     trainer.add_event_handler(Events.EPOCH_COMPLETED, latest_saver, {'model': model,'opt':optimizer})  # type: ignore
     # Use Events.EPOCH_COMPLETED(every=N) for save_interval
     trainer.add_event_handler(Events.EPOCH_COMPLETED(every=args.save_interval), epoch_saver, {'model': model,'opt':optimizer})  # type: ignore
-    valid_evaluator.add_event_handler(Events.COMPLETED, loss_saver, {'model': model})  # type: ignore
+    # Changed: Attach loss_saver to trainer instead of valid_evaluator since validation is skipped
+    # This saves the best training loss checkpoint instead of validation loss
+    trainer.add_event_handler(Events.EPOCH_COMPLETED, loss_saver, {'model': model})  # type: ignore
+    # NOTE: When validation is re-enabled, uncomment the line below and remove the line above
+    # valid_evaluator.add_event_handler(Events.COMPLETED, loss_saver, {'model': model})  # type: ignore
 
     if not args.skip_train:
         trainer.run(train_loader,max_epochs=args.epoch)
@@ -639,6 +728,24 @@ def main(args):
         model.eval()
         with torch.no_grad():
             boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
+
+            # CRITICAL: Log room indices to diagnose out-of-bounds issue
+            if (objs >= 5).any() or (objs < 0).any():
+                logging.error(f"Invalid room indices in test batch objs: {objs[objs >= 5].tolist() if (objs >= 5).any() else 'none'}")
+                logging.error(f"Batch name: {name}")
+                logging.error(f"All objs: {objs.tolist()}")
+                # Skip this batch
+                return {}
+            
+            # CRITICAL: Also check layout tensor (segmentation map)
+            # Layout can have indices 0-4 (rooms) and 5 (background/boundary - ignored in loss)
+            if (layout > 5).any() or (layout < 0).any():
+                invalid_vals = layout[(layout > 5) | (layout < 0)].unique().tolist()
+                logging.error(f"Invalid layout indices in test batch: {invalid_vals}")
+                logging.error(f"Batch name: {name}")
+                logging.error(f"Layout min: {layout.min().item()}, max: {layout.max().item()}")
+                # Clamp layout to valid range [0, 5]
+                layout = torch.clamp(layout, 0, 5)
 
             model_out = model(
                 objs, 

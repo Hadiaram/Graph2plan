@@ -1355,20 +1355,22 @@ def AutoAdjustGraph(request):
     room_idx_to_name = {
         0: 'LivingRoom', 1: 'MasterRoom', 2: 'Kitchen', 3: 'Bathroom',
         4: 'DiningRoom', 5: 'ChildRoom', 6: 'StudyRoom', 7: 'SecondRoom',
-        8: 'GuestRoom', 9: 'Balcony', 10: 'Entrance', 11: 'Storage', 12: 'Wall-in'
+        8: 'GuestRoom', 9: 'Balcony', 10: 'Entrance', 11: 'Storage', 12: 'Wall-in',
+        13: 'MasterRoom'  # Index 13 = combined bedroom count, treat as MasterRoom
     }
 
     # Bedroom types (they can be grouped)
     bedroom_types = ['MasterRoom', 'ChildRoom', 'StudyRoom', 'SecondRoom', 'GuestRoom']
 
     # Count current rooms by type
-    current_room_counts = {i: 0 for i in range(13)}
+    current_room_counts = {i: 0 for i in range(14)}
     for indx, rmname, x, y, scalesize in newNode:
         for room_idx, room_name in room_idx_to_name.items():
             if rmname == room_name or (room_name == 'MasterRoom' and rmname in bedroom_types):
                 if room_name == 'MasterRoom' and rmname in bedroom_types:
-                    # All bedrooms count towards bedroom count (index 1)
+                    # All bedrooms count towards bedroom count (index 1 and index 13)
                     current_room_counts[1] += 1
+                    current_room_counts[13] += 1
                 else:
                     current_room_counts[room_idx] += 1
                 break
@@ -1379,7 +1381,7 @@ def AutoAdjustGraph(request):
     rooms_to_add = []
     rooms_to_remove = []
 
-    for room_idx in range(13):
+    for room_idx in range(14):
         if not roomactarr[room_idx]:  # Skip inactive room types
             continue
 

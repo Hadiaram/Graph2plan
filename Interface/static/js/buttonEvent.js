@@ -12,6 +12,8 @@ var dragging_circle = null; // Track the currently dragging circle
 var startRectvalue = [-1, -1, -1, -1];
 var startPoint = [-1, -1, -1, -1, -1];
 var RelRectvalue = [];
+var rightDeleteMode = false; // Track delete mode for right-side interface
+var deletedRightRooms = []; // Track deleted room IDs
 $(document).ready(function () {
     start();//执行函数
     isTrans = 0;
@@ -117,6 +119,44 @@ function start() {
     animateHeight2(true);
     animateHeight3(true);
     animateHeight4(true);
+
+    // Delete Mode toggle for right-side interface
+    $('#deleteMode').on('click', function() {
+        rightDeleteMode = !rightDeleteMode;
+        var btn = document.getElementById('deleteMode');
+        if (rightDeleteMode) {
+            btn.style.backgroundColor = '#43a047'; // Green when active
+            btn.textContent = 'Delete Mode: ON';
+            // Add visual feedback to right box
+            document.getElementById('rightbox').style.border = '3px solid #e53935';
+        } else {
+            btn.style.backgroundColor = '#e53935'; // Red when inactive
+            btn.textContent = 'Delete Mode: OFF';
+            document.getElementById('rightbox').style.border = '2px solid #d2d2d2';
+        }
+    });
+
+    // Reset button for right-side interface
+    $('#resetRight').on('click', function() {
+        console.log("Resetting right side view");
+        resetRightSide();
+        RightInit(); // Clear the SVGs
+
+        // Get the current selected room ID from cookie to reload the view
+        var arr, reg = new RegExp("(^| )roomID=([^;]*)(;|$)");
+        var roomID = null;
+        if (arr = document.cookie.match(reg)) {
+            roomID = arr[2];
+            if (roomID) {
+                CreateRightImage(roomID); // Reload the image
+            }
+        }
+
+        // Turn off delete mode
+        if (rightDeleteMode) {
+            $('#deleteMode').click();
+        }
+    });
 }
 
 function addLivingRoom(BtnID) {//这个加点的
@@ -242,8 +282,10 @@ function ListBox(ret, rooms, metadata) {
             // d3.select('body').select('#LeftLayoutSVG').selectAll("svg > *").remove();
             console.time('time');
             console.log(this.id.split("_")[1]);
-            CreateRightImage(this.id.split("_")[1]);
             var Rightid = this.id.split("_")[1];
+            CreateRightImage(Rightid);
+            // Store roomID in cookie for reset functionality
+            document.cookie = "roomID=" + Rightid;
             document.getElementById("transfer").onclick = function () {
                 d3.select('body').select('#LeftGraphSVG').selectAll('.TransLine').remove();
                 d3.select('body').select('#LeftGraphSVG').selectAll('.TransCircle').remove();
@@ -573,6 +615,11 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
 
 function CreateRightImage(roomID) {
     $.getJSON("/index/LoadTrainHouse/", {'roomID': roomID}, function (ret) {
+        // Store the data globally for proper node-to-box matching
+        window.rightRoomData = {
+            rmpos: ret['rmpos'],
+            hsbox: ret['hsbox']
+        };
         //Graph edge
         for (var i = 0; i < ret['hsedge'].length; i++) {
             var roomA = ret['hsedge'][i][0];
@@ -586,12 +633,34 @@ function CreateRightImage(roomID) {
                 .attr("stroke", "#000000")
                 .attr("stroke-width", "2px")
                 .attr("id", ret['rmpos'][roomA][1] + "-" + ret['rmpos'][roomB][1])
+                .attr("class", "right-edge")
+                .style("cursor", "pointer")
+                .on("click", function() {
+                    if (rightDeleteMode) {
+                        removeRightEdge(this);
+                    }
+                })
+                .on("mouseover", function() {
+                    if (rightDeleteMode) {
+                        d3.select(this)
+                            .attr("stroke", "#e53935")
+                            .attr("stroke-width", "4px");
+                    }
+                })
+                .on("mouseout", function() {
+                    if (rightDeleteMode) {
+                        d3.select(this)
+                            .attr("stroke", "#000000")
+                            .attr("stroke-width", "2px");
+                    }
+                });
         }
         //Graph node size
         console.log(ret['rmsize']);
         console.log(ret['rmpos']);
         //Graph node
         for (var i = 0; i < ret['rmpos'].length; i++) {
+            var nodeId = (i + 1) + "-" + ret['rmpos'][i][1];
             d3.select('body').select('#RightSVG').append('circle')
                 .attr("cx", ret['rmpos'][i][2])
                 .attr("cy", ret['rmpos'][i][3])
@@ -601,7 +670,29 @@ function CreateRightImage(roomID) {
 
                 .attr("stroke", "#000000")
                 .attr("stroke-width", 2)
-                .attr("id", (i + 1) + "-" + ret['rmpos'][i][1])
+                .attr("id", nodeId)
+                .attr("class", "right-node")
+                .attr("data-rmpos-index", i)  // Store rmpos index for matching
+                .style("cursor", "pointer")
+                .on("click", function() {
+                    if (rightDeleteMode) {
+                        removeRightNode(this);
+                    }
+                })
+                .on("mouseover", function() {
+                    if (rightDeleteMode) {
+                        d3.select(this)
+                            .attr("stroke", "#e53935")
+                            .attr("stroke-width", 4);
+                    }
+                })
+                .on("mouseout", function() {
+                    if (rightDeleteMode) {
+                        d3.select(this)
+                            .attr("stroke", "#000000")
+                            .attr("stroke-width", 2);
+                    }
+                });
         }
         d3.select('body').select('#RightSVG').attr("transform", "scale(1.5)");
 
@@ -636,8 +727,30 @@ function CreateRightImage(roomID) {
                 .attr("stroke-width", 3)//加边框厚度
                 .attr("stroke", interiorwall_color)
                 .attr("fill", color)//填充颜色
-                .attr("id", roomType);
-            
+                .attr("id", roomType)
+                .attr("class", "right-room-" + i)
+                .attr("data-hsbox-index", i)  // Store hsbox index for matching
+                .style("cursor", "pointer")
+                .on("click", function() {
+                    if (rightDeleteMode) {
+                        removeRightRoom(this);
+                    }
+                })
+                .on("mouseover", function() {
+                    if (rightDeleteMode) {
+                        d3.select(this)
+                            .attr("stroke", "#e53935")
+                            .attr("stroke-width", 5);
+                    }
+                })
+                .on("mouseout", function() {
+                    if (rightDeleteMode) {
+                        d3.select(this)
+                            .attr("stroke", interiorwall_color)
+                            .attr("stroke-width", 3);
+                    }
+                });
+
             // Only apply clipping to non-balcony rooms
             if (roomType !== "Balcony") {
                 rect.attr("clip-path", "url(#Rightclip-th)");
@@ -664,6 +777,195 @@ function CreateRightImage(roomID) {
     });
     d3.select('body').select('#RightLayoutSVG').attr("transform", "scale(1.5)");
 
+}
+
+// Function to remove a graph node (circle) from the right side
+function removeRightNode(nodeElement) {
+    var nodeId = nodeElement.id;
+    var rmposIndex = parseInt(nodeElement.getAttribute("data-rmpos-index"));
+    console.log("Removing node: " + nodeId + ", rmpos index: " + rmposIndex);
+
+    // Add to deleted list
+    deletedRightRooms.push(nodeId);
+
+    // Get node center coordinates from stored data
+    if (window.rightRoomData && window.rightRoomData.rmpos[rmposIndex]) {
+        var nodeCx = window.rightRoomData.rmpos[rmposIndex][2];
+        var nodeCy = window.rightRoomData.rmpos[rmposIndex][3];
+        var roomType = window.rightRoomData.rmpos[rmposIndex][1];
+
+        console.log("Node center: (" + nodeCx + ", " + nodeCy + "), type: " + roomType);
+
+        // Find ALL boxes that contain this node center, then pick the best match
+        var matchingBoxes = [];
+        d3.select('#RightLayoutSVG').selectAll('rect').each(function() {
+            var boxIndex = parseInt(this.getAttribute("data-hsbox-index"));
+            if (window.rightRoomData.hsbox[boxIndex]) {
+                var boxData = window.rightRoomData.hsbox[boxIndex][0];
+                var boxType = window.rightRoomData.hsbox[boxIndex][1][0];
+                var x1 = boxData[0], y1 = boxData[1], x2 = boxData[2], y2 = boxData[3];
+
+                // Check if node center is within box bounds (with small tolerance)
+                var tolerance = 5;
+                if (nodeCx >= x1 - tolerance && nodeCx <= x2 + tolerance &&
+                    nodeCy >= y1 - tolerance && nodeCy <= y2 + tolerance) {
+                    var area = (x2 - x1) * (y2 - y1);
+                    var typeMatch = (boxType === roomType);
+                    matchingBoxes.push({
+                        element: this,
+                        boxIndex: boxIndex,
+                        area: area,
+                        typeMatch: typeMatch
+                    });
+                }
+            }
+        });
+
+        // If we found matching boxes, pick the best one
+        if (matchingBoxes.length > 0) {
+            // Sort by: 1) type match first, 2) then smallest area (most specific)
+            matchingBoxes.sort(function(a, b) {
+                if (a.typeMatch && !b.typeMatch) return -1;
+                if (!a.typeMatch && b.typeMatch) return 1;
+                return a.area - b.area; // Smaller area is better match
+            });
+
+            var bestMatch = matchingBoxes[0];
+            console.log("Found best matching box at hsbox index: " + bestMatch.boxIndex +
+                       " (type match: " + bestMatch.typeMatch + ", area: " + bestMatch.area + ")");
+
+            // Remove only the best matching box
+            d3.select(bestMatch.element)
+                .transition()
+                .duration(300)
+                .attr("opacity", 0)
+                .remove();
+        }
+
+        // Find and remove connected edges
+        d3.select('#RightSVG').selectAll('line').each(function() {
+            var lineId = this.id;
+            if (lineId.includes(roomType)) {
+                d3.select(this)
+                    .transition()
+                    .duration(300)
+                    .attr("opacity", 0)
+                    .remove();
+            }
+        });
+    }
+
+    // Remove the node with fade animation
+    d3.select(nodeElement)
+        .transition()
+        .duration(300)
+        .attr("opacity", 0)
+        .remove();
+}
+
+// Function to remove a room box (rectangle) from the right side
+function removeRightRoom(roomElement) {
+    var roomId = roomElement.id; // This is the room type (e.g., "Bedroom")
+    var hsboxIndex = parseInt(roomElement.getAttribute("data-hsbox-index"));
+    console.log("Removing room box: " + roomId + ", hsbox index: " + hsboxIndex);
+
+    // Get box bounds from stored data
+    if (window.rightRoomData && window.rightRoomData.hsbox[hsboxIndex]) {
+        var boxData = window.rightRoomData.hsbox[hsboxIndex][0];
+        var boxType = window.rightRoomData.hsbox[hsboxIndex][1][0];
+        var x1 = boxData[0], y1 = boxData[1], x2 = boxData[2], y2 = boxData[3];
+        var boxCx = (x1 + x2) / 2;
+        var boxCy = (y1 + y2) / 2;
+
+        console.log("Box bounds: (" + x1 + ", " + y1 + ") to (" + x2 + ", " + y2 + "), type: " + boxType);
+
+        // Find ALL nodes within this box, then pick the best match
+        var matchingNodes = [];
+        d3.select('#RightSVG').selectAll('circle').each(function() {
+            var rmposIndex = parseInt(this.getAttribute("data-rmpos-index"));
+            if (window.rightRoomData.rmpos[rmposIndex]) {
+                var nodeCx = window.rightRoomData.rmpos[rmposIndex][2];
+                var nodeCy = window.rightRoomData.rmpos[rmposIndex][3];
+                var nodeType = window.rightRoomData.rmpos[rmposIndex][1];
+
+                // Check if node center is within box bounds (with small tolerance)
+                var tolerance = 5;
+                if (nodeCx >= x1 - tolerance && nodeCx <= x2 + tolerance &&
+                    nodeCy >= y1 - tolerance && nodeCy <= y2 + tolerance) {
+                    // Calculate distance from node to box center
+                    var distSq = (nodeCx - boxCx) * (nodeCx - boxCx) + (nodeCy - boxCy) * (nodeCy - boxCy);
+                    var typeMatch = (nodeType === boxType);
+                    matchingNodes.push({
+                        element: this,
+                        rmposIndex: rmposIndex,
+                        nodeType: nodeType,
+                        distSq: distSq,
+                        typeMatch: typeMatch
+                    });
+                }
+            }
+        });
+
+        // If we found matching nodes, pick the best one
+        if (matchingNodes.length > 0) {
+            // Sort by: 1) type match first, 2) then closest to box center
+            matchingNodes.sort(function(a, b) {
+                if (a.typeMatch && !b.typeMatch) return -1;
+                if (!a.typeMatch && b.typeMatch) return 1;
+                return a.distSq - b.distSq; // Closer is better
+            });
+
+            var bestMatch = matchingNodes[0];
+            console.log("Found best matching node at rmpos index: " + bestMatch.rmposIndex +
+                       ", type: " + bestMatch.nodeType +
+                       " (type match: " + bestMatch.typeMatch + ")");
+
+            // Remove only the best matching node
+            d3.select(bestMatch.element)
+                .transition()
+                .duration(300)
+                .attr("opacity", 0)
+                .remove();
+
+            // Remove connected edges
+            d3.select('#RightSVG').selectAll('line').each(function() {
+                var lineId = this.id;
+                if (lineId.includes(bestMatch.nodeType)) {
+                    d3.select(this)
+                        .transition()
+                        .duration(300)
+                        .attr("opacity", 0)
+                        .remove();
+                }
+            });
+        }
+    }
+
+    // Remove the rectangle with fade animation
+    d3.select(roomElement)
+        .transition()
+        .duration(300)
+        .attr("opacity", 0)
+        .remove();
+}
+
+// Function to remove a graph edge (line) from the right side
+function removeRightEdge(edgeElement) {
+    var edgeId = edgeElement.id;
+    console.log("Removing edge: " + edgeId);
+
+    // Remove the edge with fade animation
+    d3.select(edgeElement)
+        .transition()
+        .duration(300)
+        .attr("opacity", 0)
+        .remove();
+}
+
+// Function to clear all deleted rooms and reset the right side
+function resetRightSide() {
+    deletedRightRooms = [];
+    console.log("Reset right side - cleared deleted rooms list");
 }
 
 function GetEditGraph(ret) {

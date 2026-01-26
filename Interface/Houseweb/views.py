@@ -1492,20 +1492,38 @@ def AutoAdjustGraph(request):
         print(f"Added {room_name} at ({new_x:.1f}, {new_y:.1f}), min distance from existing: {best_min_dist:.1f}px")
         next_index += 1
 
-    # Remove excess rooms (remove from the end first)
+    # Remove excess rooms (prefer nodes with fewer edges to minimize disconnection)
     for room_name, count_to_remove in rooms_to_remove:
+        # Find all candidate nodes of this room type
+        candidates = []
+        for i, (indx, rmname, x, y, scalesize) in enumerate(newNode):
+            if rmname == room_name or (room_name == 'MasterRoom' and rmname in bedroom_types):
+                # Count how many edges this node has
+                node_id = int(indx)
+                edge_count = sum(1 for u, v in newEdge if int(u) == node_id or int(v) == node_id)
+                candidates.append((edge_count, i, node_id, rmname))
+
+        # Sort by edge count (ascending) - remove nodes with fewest edges first
+        candidates.sort(key=lambda x: x[0])
+
+        # Remove the nodes with fewest edges
         removed = 0
-        # Remove from the end of the list
-        for i in range(len(newNode) - 1, -1, -1):
+        for edge_count, list_idx, node_id, rmname in candidates:
             if removed >= count_to_remove:
                 break
-            indx, rmname, x, y, scalesize = newNode[i]
-            if rmname == room_name or (room_name == 'MasterRoom' and rmname in bedroom_types):
-                # Remove this node
-                removed_index = int(indx)
-                newNode.pop(i)
+
+            # Find current index in newNode (indices shift as we remove)
+            actual_idx = None
+            for i, (indx, _, _, _, _) in enumerate(newNode):
+                if int(indx) == node_id:
+                    actual_idx = i
+                    break
+
+            if actual_idx is not None:
+                print(f"Removing {rmname} (node {node_id}) with {edge_count} edge(s)")
+                newNode.pop(actual_idx)
                 # Remove all edges connected to this node
-                newEdge = [[u, v] for u, v in newEdge if int(u) != removed_index and int(v) != removed_index]
+                newEdge = [[u, v] for u, v in newEdge if int(u) != node_id and int(v) != node_id]
                 removed += 1
 
     # Note: New nodes are added without edges

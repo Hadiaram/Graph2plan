@@ -1,6 +1,7 @@
 # Train.py - Complete Training Logic Explanation
 
 ## Overview
+
 This file implements the **training pipeline** for the Graph2Plan model. It handles data loading, optimization, loss computation, validation, and all epoch-dependent training strategies.
 
 **Key Insight**: This file contains ALL epoch-aware logic. The model itself (model.py) is epoch-agnostic.
@@ -12,7 +13,7 @@ This file implements the **training pipeline** for the Graph2Plan model. It hand
 
 ## File Structure
 
-```
+```text
 Lines 1-35:    Imports
 Lines 36-103:  Argument parsing (configuration)
 Lines 105-197: Setup functions (model, data, optimizer, losses)
@@ -24,13 +25,14 @@ Lines 869-872: Entry point
 
 ---
 
-# Part 1: Configuration (Lines 36-103)
+## Part 1: Configuration (Lines 36-103)
 
-## Lines 36-103: parse_args() - Command Line Arguments
+### Lines 36-103: parse_args() - Command Line Arguments
 
 All hyperparameters and settings are configured via command line arguments.
 
-### Dataset Parameters (Lines 39-45)
+#### Dataset Parameters (Lines 39-45)
+
 ```python
 parser.add_argument('--dataset_dir', default='./data', type=str)
 parser.add_argument('--image_size', default='128,128', type=int_tuple)
@@ -39,6 +41,7 @@ parser.add_argument('--with_house', default='0', type=bool_flag)
 parser.add_argument('--pos_dim', default=25, type=int)
 parser.add_argument('--area_dim', default=10, type=int)
 ```
+
 - **dataset_dir**: Path to .mat data files
 - **image_size**: Output resolution (128×128 pixels)
 - **input_dim**: Boundary image channels (3 = RGB)
@@ -47,17 +50,20 @@ parser.add_argument('--area_dim', default=10, type=int)
 - **area_dim**: Area attribute dimensions (10D)
 - **Total attributes**: 25 + 10 = 35D
 
-### Dataloader Parameters (Lines 47-50)
+#### Dataloader Parameters (Lines 47-50)
+
 ```python
 parser.add_argument('--batch_size', default=20, type=int)
 parser.add_argument('--workers', default=8, type=int)
 parser.add_argument('--train_shuffle', default='1', type=bool_flag)
 ```
+
 - **batch_size=20**: 20 floor plans per batch
 - **workers=8**: 8 parallel data loading processes
 - **train_shuffle=True**: Randomize training data order
 
-### Model Architecture Parameters (Lines 52-65)
+#### Model Architecture Parameters (Lines 52-65)
+
 ```python
 # architecture
 parser.add_argument('--gene_layout', default='1', type=bool_flag)
@@ -73,6 +79,7 @@ parser.add_argument('--roi_cat_feature',default='1',type=bool_flag)
 parser.add_argument('--gt_box', default=0, type=bool_flag)
 parser.add_argument('--relative', default=1, type=bool_flag)
 ```
+
 - **gene_layout**: Enable layout generation (refinement_net)
 - **box_refine**: Enable box refinement (two-stage)
 - **embedding_dim**: Room embedding size (128D)
@@ -82,7 +89,8 @@ parser.add_argument('--relative', default=1, type=bool_flag)
 - **gt_box**: Use ground truth boxes (for debugging)
 - **relative**: Use relative coordinates (inside boundary)
 
-### Loss Function Parameters (Lines 67-74)
+#### Loss Function Parameters (Lines 67-74)
+
 ```python
 parser.add_argument('--mutex', default=1, type=bool_flag)
 parser.add_argument('--inside', default=1, type=bool_flag)
@@ -92,6 +100,7 @@ parser.add_argument('--nsample', default=100,type=int)
 parser.add_argument('--loss_refine', default=0, type=bool_flag)
 parser.add_argument('--render_refine', default=0, type=bool_flag)
 ```
+
 - **mutex**: Enable mutual exclusion loss (prevent overlap)
 - **inside**: Enable containment loss (rooms inside boundary)
 - **coverage**: Enable coverage loss (cover required areas)
@@ -100,7 +109,8 @@ parser.add_argument('--render_refine', default=0, type=bool_flag)
 - **loss_refine**: Apply geometric losses to refined boxes (disabled)
 - **render_refine**: Apply render loss to refined boxes (disabled)
 
-### Optimizer Parameters (Lines 76-83)
+#### Optimizer Parameters (Lines 76-83)
+
 ```python
 parser.add_argument('--optimizer',default='Adam',type=str)
 parser.add_argument('--scheduler',default='plateau',type=str)
@@ -110,6 +120,7 @@ parser.add_argument('--step_size', default=10, type=float)
 parser.add_argument('--step_rate', default=0.5, type=float)
 parser.add_argument('--grad_clip', default=1.0, type=float)  # Gradient clipping max norm
 ```
+
 - **optimizer='Adam'**: Adam optimizer (also supports SGD, AdamW)
 - **scheduler='plateau'**: ReduceLROnPlateau (reduce LR when metrics plateau)
 - **learning_rate=5e-5**: Conservative LR to prevent NaN (reduced from 1e-4)
@@ -118,29 +129,34 @@ parser.add_argument('--grad_clip', default=1.0, type=float)  # Gradient clipping
 - **step_rate=0.5**: LR reduction factor (multiply by 0.5)
 - **grad_clip=1.0**: Maximum gradient norm (prevent exploding gradients)
 
-### Checkpoint Parameters (Lines 85-89)
+#### Checkpoint Parameters (Lines 85-89)
+
 ```python
 parser.add_argument('--save_interval', default=5, type=int)
 parser.add_argument('--n_saved', default=20, type=int)
 parser.add_argument('--pretrain', default=None, type=str)
 parser.add_argument('--skip_train', default=0, type=bool_flag)
 ```
+
 - **save_interval=5**: Save checkpoint every 5 epochs
 - **n_saved=20**: Keep last 20 checkpoints
 - **pretrain**: Path to pretrained model (for resuming)
 - **skip_train**: Skip training, only test (for evaluation)
 
-### Training Parameters (Lines 91-94)
+#### Training Parameters (Lines 91-94)
+
 ```python
 parser.add_argument('--seed', default=74269,type=int)
 parser.add_argument('--epoch', default=101,type=int)
 parser.add_argument('--start_epoch',default=None,type=int)
 ```
+
 - **seed=74269**: Random seed for reproducibility
 - **epoch=101**: Total training epochs
 - **start_epoch**: Resume from specific epoch
 
-### Debug Parameters (Lines 96-101)
+#### Debug Parameters (Lines 96-101)
+
 ```python
 parser.add_argument('--gpu', default='0', type=str)
 parser.add_argument('--multi_gpu', default=None, type=str)
@@ -148,6 +164,7 @@ parser.add_argument('--suffix',default=None,type=str)
 parser.add_argument('--debug', default=0, type=bool_flag)
 parser.add_argument('--test', default=0, type=bool_flag)
 ```
+
 - **gpu='0'**: Which GPU to use
 - **multi_gpu**: Multiple GPU string (e.g., '0,1,2,3')
 - **suffix**: Custom experiment name suffix
@@ -156,9 +173,10 @@ parser.add_argument('--test', default=0, type=bool_flag)
 
 ---
 
-# Part 2: Setup Functions (Lines 105-197)
+## Part 2: Setup Functions (Lines 105-197)
 
-## Lines 105-109: check_manual_seed() - Set Random Seeds
+### Lines 105-109: check_manual_seed() - Set Random Seeds
+
 ```python
 def check_manual_seed(args):
     seed = args.seed or random.randint(1, 10000)
@@ -166,13 +184,15 @@ def check_manual_seed(args):
     np.random.seed(seed)
     torch.manual_seed(seed)
 ```
+
 **Purpose**: Ensure reproducible results by seeding all random number generators.
 
 **Note**: Line 242 comments this out (`# check_manual_seed(args)`), so seeds are NOT actually set!
 
 ---
 
-## Lines 111-118: get_model() - Create Model Instance
+### Lines 111-118: get_model() - Create Model Instance
+
 ```python
 def get_model(args):
     return Model(embedding_dim=args.embedding_dim,
@@ -183,22 +203,27 @@ def get_model(args):
     box_refine_arch=args.box_refine_arch if args.box_refine else None,
     roi_cat_feature=args.roi_cat_feature)
 ```
+
 **Key Logic**:
+
 - `refinement_dims=None` if gene_layout disabled → No layout generation
 - `box_refine_arch=None` if box_refine disabled → No box refinement
 
 ---
 
-## Lines 120-142: Data Loading Functions
+### Lines 120-142: Data Loading Functions
 
-### Lines 120-121: get_dataset() - Load .mat Dataset
+#### Lines 120-121: get_dataset() - Load .mat Dataset
+
 ```python
 def get_dataset(args,split='valid'):
     return FloorPlanDataset(f'{args.dataset_dir}/data_{split}.mat')
 ```
+
 Loads: `data_train.mat`, `data_valid.mat`, or `data_test.mat`
 
-### Lines 123-132: get_dataloader() - Create DataLoader
+#### Lines 123-132: get_dataloader() - Create DataLoader
+
 ```python
 def get_dataloader(args,dataset,split):
     print(f"{split},shuffle:",split=='train' and args.train_shuffle and (not args.debug))
@@ -211,12 +236,15 @@ def get_dataloader(args,dataset,split):
         collate_fn=floorplan_collate_fn
     )
 ```
+
 **Key Logic**:
+
 - **Shuffle**: Only for training (unless debug mode)
 - **drop_last**: Drop incomplete last batch in training (ensures consistent batch size)
 - **collate_fn**: Custom function to batch variable-size graphs
 
 ### Lines 134-142: get_data_loaders() - Create All Loaders
+
 ```python
 def  get_data_loaders(args):
     train_dataset = get_dataset(args,'train' if not args.debug else 'valid') if not args.skip_train else None
@@ -228,11 +256,13 @@ def  get_data_loaders(args):
     test_loader = get_dataloader(args,test_dataset,'test')
     return train_loader,valid_loader,test_loader
 ```
+
 **Debug mode trick**: Uses validation set for training (faster iteration)
 
 ---
 
-## Lines 144-161: get_optimizer() - Create Optimizer
+### Lines 144-161: get_optimizer() - Create Optimizer
+
 ```python
 def get_optimizer(model,args):
     if args.optimizer == 'SGD':
@@ -253,11 +283,13 @@ def get_optimizer(model,args):
         )
     return optimizer
 ```
+
 **Default**: Adam with LR=5e-5, weight_decay=1e-4
 
 ---
 
-## Lines 163-168: get_scheduler() - Create Learning Rate Scheduler
+### Lines 163-168: get_scheduler() - Create Learning Rate Scheduler
+
 ```python
 def get_scheduler(optimizer,args):
     if args.scheduler == 'step':
@@ -266,7 +298,9 @@ def get_scheduler(optimizer,args):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,mode='max',factor=args.step_rate,patience=args.step_size,threshold=0.005,verbose=True)
     return scheduler
 ```
+
 **Default**: ReduceLROnPlateau
+
 - **mode='max'**: Maximize metrics (IoU + accuracy)
 - **factor=0.5**: Reduce LR by half
 - **patience=10**: Wait 10 epochs before reducing
@@ -274,9 +308,10 @@ def get_scheduler(optimizer,args):
 
 ---
 
-## Lines 170-197: get_losses() - Create Loss Functions
+### Lines 170-197: get_losses() - Create Loss Functions
 
-### Lines 172-176: Get Vocabulary and Setup
+#### Lines 172-176: Get Vocabulary and Setup
+
 ```python
 loss = {}
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -285,17 +320,21 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 vocab = get_vocab()
 num_classes = len(vocab['object_idx_to_name'])
 ```
+
 **num_classes=5**: After balcony removal (LivingRoom, MasterRoom, Kitchen, Bathroom, SecondBedroom)
 
-### Lines 178-181: Create Class Weights
+#### Lines 178-181: Create Class Weights
+
 ```python
 # Create weight tensor for the actual number of classes (after balcony removal: 5 classes)
 weight = torch.ones(num_classes).to(device)
 # Note: No need to zero out External/ExteriorWall as they were removed with balconies
 ```
+
 **Purpose**: Equal weighting for all room types (could be adjusted for class imbalance)
 
-### Lines 183-196: Create Loss Modules
+#### Lines 183-196: Create Loss Modules
+
 ```python
 if args.gene_layout:
     # Use ignore_index for background/boundary pixels that are outside valid room indices
@@ -316,6 +355,7 @@ return loss
 ```
 
 **Loss Dictionary Contents**:
+
 - `gene_ce`: Cross-entropy for layout (ignores background pixels with index 5)
 - `box_mse`: Smooth L1 for initial boxes
 - `box_ref_mse`: Smooth L1 for refined boxes
@@ -326,7 +366,8 @@ return loss
 
 ---
 
-## Lines 199-207: batch_cuda() - Move Batch to GPU
+### Lines 199-207: batch_cuda() - Move Batch to GPU
+
 ```python
 def batch_cuda(batch):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -338,15 +379,17 @@ def batch_cuda(batch):
             batch[i] = [e.to(device) for e in batch[i]]
     return batch
 ```
+
 **Purpose**: Transfer all tensors in batch to GPU (or CPU if no GPU available)
 
 ---
 
-# Part 3: Main Training Function (Lines 209-724)
+## Part 3: Main Training Function (Lines 209-724)
 
-## Lines 209-244: Setup and Initialization
+### Lines 209-244: Setup and Initialization
 
-### Lines 210-227: Create Experiment Directory
+#### Lines 210-227: Create Experiment Directory
+
 ```python
 args.epoch=args.epoch if not args.debug else 6
 print("Create dir...")
@@ -369,7 +412,8 @@ output_dir.mkdir(exist_ok=True)
 ```
 
 **Directory Structure**:
-```
+
+```text
 ../experiment/
 └── 2026-01-28/
     └── DeepLayout_2026-01-28_14-30-45/
@@ -380,7 +424,8 @@ output_dir.mkdir(exist_ok=True)
 
 **Important**: Copies entire codebase to logs for reproducibility
 
-### Lines 228-240: Setup Logging
+#### Lines 228-240: Setup Logging
+
 ```python
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -397,9 +442,11 @@ logger.info(args)
 logger.info('---------------------------------------------------TRANING---------------------------------------------------')
 logger.info(f'Use seed: {args.seed}')
 ```
+
 **Logs**: All print statements and logging calls go to `logs/log.txt`
 
-### Lines 244-265: Load Model and Data
+#### Lines 244-265: Load Model and Data
+
 ```python
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu if args.multi_gpu is None else args.multi_gpu
 
@@ -424,9 +471,11 @@ box_refine_arch=args.box_refine_arch if args.box_refine else None,
 roi_cat_feature=args.roi_cat_feature))
 logger.info(str(model))
 ```
+
 **Logs model configuration** for debugging and reproducibility
 
-### Lines 266-280: Create Optimizer and Load Checkpoint
+#### Lines 266-280: Create Optimizer and Load Checkpoint
+
 ```python
 optimizer = get_optimizer(model,args)
 scheduler = get_scheduler(optimizer,args)
@@ -444,11 +493,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 model.to(device)
 ```
+
 **map_location=device**: Ensures checkpoint loads correctly even if saved on different device
 
 ---
 
-## Lines 282-294: NaN/Inf Detection Helper
+### Lines 282-294: NaN/Inf Detection Helper
 
 ```python
 def check_tensor_for_nan(tensor, name, epoch, iteration):
@@ -472,11 +522,11 @@ def check_tensor_for_nan(tensor, name, epoch, iteration):
 
 ---
 
-## Lines 296-471: update() - Training Step Function ⭐⭐⭐
+### Lines 296-471: update() - Training Step Function ⭐⭐⭐
 
 This is the **CORE TRAINING LOGIC**. Called once per batch.
 
-### Lines 297-305: Learning Rate Warmup (EPOCH BEHAVIOR #1)
+#### Lines 297-305: Learning Rate Warmup (EPOCH BEHAVIOR #1)
 
 ```python
 def update(engine,batch):
@@ -491,6 +541,7 @@ def update(engine,batch):
 ```
 
 **Warmup Schedule**:
+
 - **Epoch 1**: LR = 5e-5 × 1/3 = 1.67e-5 (33%)
 - **Epoch 2**: LR = 5e-5 × 2/3 = 3.33e-5 (66%)
 - **Epoch 3**: LR = 5e-5 × 3/3 = 5.0e-5 (100%)
@@ -500,7 +551,7 @@ def update(engine,batch):
 
 ---
 
-### Lines 306-322: Input Validation and NaN Detection
+#### Lines 306-322: Input Validation and NaN Detection
 
 ```python
 optimizer.zero_grad()
@@ -526,7 +577,7 @@ if has_bad_input:
 
 ---
 
-### Lines 324-346: Model Forward Pass with Epoch Control (EPOCH BEHAVIOR #2)
+#### Lines 324-346: Model Forward Pass with Epoch Control (EPOCH BEHAVIOR #2)
 
 ```python
 model_out = model(
@@ -557,12 +608,13 @@ if has_bad_output:
 **KEY LINE 332**: `refine = args.box_refine and engine.state.epoch>2`
 
 **Model Behavior**:
+
 - **Epochs 1-2**: `refine=False` → Single-stage (boxes_refine=None)
 - **Epoch 3+**: `refine=True` → Two-stage (boxes_refine computed)
 
 ---
 
-### Lines 348-355: Loss Weight Schedule (EPOCH BEHAVIOR #3)
+#### Lines 348-355: Loss Weight Schedule (EPOCH BEHAVIOR #3)
 
 ```python
 # Initialize total_loss as None, will be set to first valid loss
@@ -586,18 +638,20 @@ step_weight = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10
 This iterates through all enabled losses and computes them with epoch-dependent behavior.
 
 #### Lines 358-359: Box MSE Loss (Always Active)
+
 ```python
 for name in loss:
     l = None
     if name=='box_mse':
         l = loss[name](boxes_pred,boxes)
 ```
+
 **Weight**: 1.0 (no scaling)
 **Purpose**: Main loss for box prediction
 
 ---
 
-#### Lines 360-385: Gene_ce Loss (Gradual from Epoch 1) (EPOCH BEHAVIOR #4)
+##### Lines 360-385: Gene_ce Loss (Gradual from Epoch 1) (EPOCH BEHAVIOR #4)
 
 ```python
 elif name=='gene_ce':
@@ -629,6 +683,7 @@ elif name=='gene_ce':
 ```
 
 **Weight Schedule**:
+
 - **Epoch 1**: 0.005 (0.5%)
 - **Epoch 2**: 0.01 (1%)
 - **Epoch 3**: 0.02 (2%)
@@ -639,7 +694,7 @@ elif name=='gene_ce':
 
 ---
 
-#### Lines 386-395: Mutex Loss (EPOCH BEHAVIOR #5)
+##### Lines 386-395: Mutex Loss (EPOCH BEHAVIOR #5)
 
 ```python
 elif name=='mutex':
@@ -654,6 +709,7 @@ elif name=='mutex':
 ```
 
 **Behavior**:
+
 - **Epochs 1-2**: Only compute on `boxes_pred`
 - **Epoch 3+**: Compute on BOTH `boxes_pred` AND `boxes_refine` (if loss_refine enabled)
 
@@ -661,7 +717,7 @@ elif name=='mutex':
 
 ---
 
-#### Lines 396-403: Inside Loss (Same Pattern)
+##### Lines 396-403: Inside Loss (Same Pattern)
 
 ```python
 elif name=='inside':
@@ -674,11 +730,12 @@ elif name=='inside':
         if not (torch.isnan(l_refine) or torch.isinf(l_refine)):
             l += l_refine
 ```
+
 **Same pattern as mutex**: Only add refinement component after epoch 2
 
 ---
 
-#### Lines 404-412: Coverage Loss (Same Pattern)
+##### Lines 404-412: Coverage Loss (Same Pattern)
 
 ```python
 elif name=='coverage':
@@ -694,7 +751,7 @@ elif name=='coverage':
 
 ---
 
-#### Lines 413-421: Render Loss (Same Pattern)
+##### Lines 413-421: Render Loss (Same Pattern)
 
 ```python
 elif name=='render':
@@ -710,7 +767,7 @@ elif name=='render':
 
 ---
 
-#### Lines 422-429: Box Refinement MSE Loss (EPOCH BEHAVIOR #6)
+##### Lines 422-429: Box Refinement MSE Loss (EPOCH BEHAVIOR #6)
 
 ```python
 elif name=='box_ref_mse' and epoch>2:  # ⭐ Only starts at epoch 3
@@ -724,6 +781,7 @@ elif name=='box_ref_mse' and epoch>2:  # ⭐ Only starts at epoch 3
 ```
 
 **Behavior**:
+
 - **Epochs 1-2**: Completely disabled (boxes_refine doesn't exist)
 - **Epoch 3**: Weight = 0.02 (2%)
 - **Epoch 31+**: Weight = 0.50 (50%)
@@ -732,7 +790,7 @@ elif name=='box_ref_mse' and epoch>2:  # ⭐ Only starts at epoch 3
 
 ---
 
-#### Lines 431-440: Accumulate Losses
+##### Lines 431-440: Accumulate Losses
 
 ```python
 if l is not None:
@@ -786,6 +844,7 @@ return loss_items
 ```
 
 **Gradient Clipping**:
+
 - **max_norm=1.0**: Gradients scaled down if norm exceeds 1.0
 - **Logging**: Tracks gradient norm every 100 iterations
 - **clip_ratio**: Shows how much clipping is needed (>1.0 means clipping active)
@@ -794,15 +853,16 @@ return loss_items
 
 ---
 
-## Lines 473-609: inference() - Validation Step Function
+### Lines 473-609: inference() - Validation Step Function
 
 This is similar to `update()` but:
+
 - No gradient computation (`with torch.no_grad()`)
 - No optimizer steps
 - Returns predictions for metric computation
 - Different epoch gating logic
 
-### Lines 473-491: Setup and Input Validation
+#### Lines 473-491: Setup and Input Validation
 
 ```python
 def inference(engine,batch):
@@ -830,7 +890,7 @@ def inference(engine,batch):
 
 ---
 
-### Lines 493-507: Model Forward (Always Full Model in Validation)
+#### Lines 493-507: Model Forward (Always Full Model in Validation)
 
 ```python
 if args.relative: boxes = box_rel2abs(boxes,inside_box,obj_to_img)
@@ -856,7 +916,7 @@ boxes_pred, gene_layout, boxes_refine = model_out
 
 ---
 
-### Lines 509-576: Loss Computation (With Epoch Gating) (EPOCH BEHAVIOR #7)
+#### Lines 509-576: Loss Computation (With Epoch Gating) (EPOCH BEHAVIOR #7)
 
 ```python
 # Initialize total_loss as None, will be set to first valid loss
@@ -892,6 +952,7 @@ for name in loss:
 ```
 
 **Validation Loss Gating**:
+
 - **Epoch 1**: Only `box_mse`
 - **Epoch 2+**: Add `gene_ce`, `mutex`, `inside`, `coverage`, `render`
 - **Epoch 3+**: Add `box_ref_mse`
@@ -935,9 +996,10 @@ return {
 
 ---
 
-## Lines 611-630: Engine Setup
+### Lines 611-630: Engine Setup
 
-### Lines 611-620: Create Engines and Set Start Epoch
+#### Lines 611-620: Create Engines and Set Start Epoch
+
 ```python
 print("Create trainer...")
 optimizer.step()
@@ -957,7 +1019,7 @@ if args.start_epoch is not None:
 
 ---
 
-### Lines 622-630: Scheduler Callback
+#### Lines 622-630: Scheduler Callback
 
 ```python
 total_func = lambda e:(e.state.metrics['box_iou']+(e.state.metrics['gene_acc'] if args.gene_layout else 0)+(e.state.metrics['box_refine_iou'] if args.box_refine else 0))
@@ -977,7 +1039,7 @@ def schedual(engine):
 
 ---
 
-## Lines 632-669: Validation Callback (Currently Disabled!)
+### Lines 632-669: Validation Callback (Currently Disabled!)
 
 ```python
 @trainer.on(Events.EPOCH_COMPLETED)  # type: ignore
@@ -1009,9 +1071,10 @@ def evaluate(engine):
 
 ---
 
-## Lines 671-706: Metrics and Logging
+### Lines 671-706: Metrics and Logging
 
-### Lines 671-676: Attach Metrics to Validator
+#### Lines 671-676: Attach Metrics to Validator
+
 ```python
 # Metrics
 MetricAverage(output_transform=lambda output:iou(output['pred'][0],output['gt'][1])).attach(valid_evaluator,'box_iou')
@@ -1022,13 +1085,14 @@ if args.box_refine:
 ```
 
 **Metrics computed**:
+
 - **box_iou**: IoU for initial boxes
 - **gene_acc**: Layout accuracy (ignoring background index 13)
 - **box_refine_iou**: IoU for refined boxes
 
 ---
 
-### Lines 680-694: Progress Bars and TensorBoard
+#### Lines 680-694: Progress Bars and TensorBoard
 
 ```python
 # TQDM
@@ -1049,6 +1113,7 @@ tb_logger.attach(valid_evaluator,
 ```
 
 **TensorBoard logs**:
+
 - Training loss every iteration
 - Learning rate every iteration
 - Validation metrics every epoch
@@ -1057,7 +1122,7 @@ tb_logger.attach(valid_evaluator,
 
 ---
 
-### Lines 696-706: Text Logging Callbacks
+#### Lines 696-706: Text Logging Callbacks
 
 ```python
 # Logging
@@ -1077,7 +1142,7 @@ def log_results(engine):
 
 ---
 
-## Lines 708-723: Checkpointing
+### Lines 708-723: Checkpointing
 
 ```python
 # Checkpoint - save_interval moved to event handler attachment
@@ -1114,7 +1179,7 @@ trainer.add_event_handler(Events.EPOCH_COMPLETED, loss_saver, {'model': model}) 
 
 ---
 
-### Lines 722-724: Start Training!
+#### Lines 722-724: Start Training
 
 ```python
 if not args.skip_train:
@@ -1128,18 +1193,19 @@ tb_logger.close()
 
 ---
 
-# Part 4: Testing Phase (Lines 726-868)
+## Part 4: Testing Phase (Lines 726-868)
 
 After training completes, run inference on test set and save detailed results.
 
-## Lines 726-843: test() - Test Function
+### Lines 726-843: test() - Test Function
 
 Very similar to `inference()` but:
+
 - Saves detailed per-sample outputs
 - Converts predictions to final format
 - Computes per-sample metrics
 
-### Lines 730-748: Input Validation (Same as inference)
+#### Lines 730-748: Input Validation (Same as inference)
 
 ```python
 def test(engine,batch):
@@ -1167,7 +1233,7 @@ def test(engine,batch):
 
 ---
 
-### Lines 750-776: Model Forward and Format Conversion
+#### Lines 750-776: Model Forward and Format Conversion
 
 ```python
 model_out = model(
@@ -1203,7 +1269,7 @@ boxes = centers_to_extents(boxes)
 
 ---
 
-### Lines 778-800: Process Layout Predictions
+#### Lines 778-800: Process Layout Predictions
 
 ```python
 ''' layout: B*C*H*W->B*H*W '''
@@ -1232,6 +1298,7 @@ if args.gene_layout:
 ```
 
 **Processing**:
+
 1. Mask layout with boundary (zero out exterior)
 2. Argmax to get predicted class per pixel
 3. Set exterior pixels to index 13 (outside)
@@ -1239,7 +1306,7 @@ if args.gene_layout:
 
 ---
 
-### Lines 802-835: Save Per-Sample Results
+#### Lines 802-835: Save Per-Sample Results
 
 ```python
 ''' save output '''
@@ -1279,6 +1346,7 @@ for i in range(len(layout)):
 ```
 
 **Output dict structure** (per sample):
+
 ```python
 {
     'sample_name_001': {
@@ -1299,9 +1367,10 @@ for i in range(len(layout)):
 
 ---
 
-## Lines 845-868: Test Evaluation and Saving
+### Lines 845-868: Test Evaluation and Saving
 
-### Lines 845-865: Run Test and Save Results
+#### Lines 845-865: Run Test and Save Results
+
 ```python
 test_evaluator = Engine(test)  # type: ignore
 
@@ -1329,16 +1398,18 @@ with open(f'{output_dir}/output_{start_time}.pkl','wb') as f:
 ```
 
 **Behavior**:
+
 - If training was run: Test on validation set
 - If skip_train: Test on test set (for final evaluation)
 
 **Saves two files**:
+
 1. `output_TIMESTAMP_metrics.json`: Aggregate metrics
 2. `output_TIMESTAMP.pkl`: Detailed per-sample results (Python pickle)
 
 ---
 
-# Part 5: Entry Point (Lines 869-872)
+## Part 5: Entry Point (Lines 869-872)
 
 ```python
 if __name__ == "__main__":
@@ -1347,18 +1418,18 @@ if __name__ == "__main__":
     main(args)
 ```
 
-**Standard Python entry point**
+### Standard Python entry point
 
 **args.argv**: Saves command line for logging (reproducibility)
 
 ---
 
-# Summary: Complete Epoch Behavior
+## Summary: Complete Epoch Behavior
 
-## Epoch-by-Epoch Breakdown
+### Epoch-by-Epoch Breakdown
 
 | Epoch | LR | Model | gene_ce | box_ref_mse | Refine Losses | Val Losses |
-|-------|----|----|---------|-------------|---------------|------------|
+| ----- | -- | ----- | ------- | ----------- | ------------- | ---------- |
 | **1** | 33% | Single | 0.5% | - | - | box_mse only |
 | **2** | 66% | Single | 1% | - | - | All except box_ref |
 | **3** | 100% | **Two-stage** | 2% | 2% | ✓ Added | All losses |
@@ -1367,47 +1438,54 @@ if __name__ == "__main__":
 
 ---
 
-## All Epoch-Dependent Behaviors
+### All Epoch-Dependent Behaviors
 
-### 1. Learning Rate Warmup (lines 299-304)
+#### 1. Learning Rate Warmup (lines 299-304)
+
 ```python
 if epoch <= 3:
     warmup_factor = min(1.0, epoch / 3.0)
     lr = args.learning_rate * warmup_factor
 ```
 
-### 2. Box Refinement Activation (line 332)
+#### 2. Box Refinement Activation (line 332)
+
 ```python
 refine = args.box_refine and engine.state.epoch>2
 ```
 
-### 3. Gene_ce Gradual Weighting (lines 355, 361-385)
+#### 3. Gene_ce Gradual Weighting (lines 355, 361-385)
+
 ```python
 step_weight = [0.005, 0.01, 0.02, ...]
 weight_idx = min(epoch-1, len(step_weight)-1)
 l = step_weight[weight_idx] * loss['gene_ce'](gene_layout, layout)
 ```
 
-### 4. Box_ref_mse Activation (line 422)
+#### 4. Box_ref_mse Activation (line 422)
+
 ```python
 elif name=='box_ref_mse' and epoch>2:
     weight_idx = min(epoch-1, len(step_weight)-1)
     l = step_weight[weight_idx] * loss[name](boxes_refine, boxes)
 ```
 
-### 5. Refinement in Geometric Losses (lines 391, 400, 409, 418)
+#### 5. Refinement in Geometric Losses (lines 391, 400, 409, 418)
+
 ```python
 elif args.box_refine and args.loss_refine and epoch>2:
     l += loss[name](boxes_refine, ...)
 ```
 
-### 6. Validation Loss Gating (line 516)
+#### 6. Validation Loss Gating (line 516)
+
 ```python
 if engine.state.epoch>1:
     # Compute gene_ce, mutex, inside, coverage, render
 ```
 
-### 7. Validation Box_ref_mse (line 557)
+#### 7. Validation Box_ref_mse (line 557)
+
 ```python
 if engine.state.epoch>2:
     if name=='box_ref_mse':
@@ -1416,9 +1494,9 @@ if engine.state.epoch>2:
 
 ---
 
-# Training Flow Diagram
+## Training Flow Diagram
 
-```
+```text
 Program Start
     ↓
 Parse Arguments (lines 36-103)
@@ -1466,11 +1544,12 @@ Program End
 
 ---
 
-# Key Insights
+## Key Insights
 
-## 1. Why Training is Unstable
+### 1. Why Training is Unstable
 
 **Evidence**:
+
 - 31-epoch gradual loss weighting (not typical)
 - NaN/Inf checks everywhere (lines 282-294, 312-346, 388-429)
 - Conservative learning rate (5e-5 instead of 1e-4)
@@ -1483,19 +1562,20 @@ Program End
 
 ---
 
-## 2. The Critical Epoch: Epoch 3
+### 2. The Critical Epoch: Epoch 3
 
 **What changes**:
+
 - Learning rate reaches 100%
 - Two-stage model activates (box refinement begins)
 - Box_ref_mse loss turns on
 - Refinement added to geometric losses
 
-**This is when the model becomes "complete"**
+### This is when the model becomes "complete"
 
 ---
 
-## 3. Validation is Broken
+### 3. Validation is Broken
 
 **Line 636**: Validation completely disabled
 
@@ -1507,19 +1587,22 @@ Program End
 
 ---
 
-## 4. Training vs Inference Differences
+### 4. Training vs Inference Differences
 
 **Training (epochs 1-2)**:
+
 ```python
 refine = args.box_refine and engine.state.epoch>2  # False
 ```
 
 **Validation (all epochs)**:
+
 ```python
 refine = args.box_refine  # True
 ```
 
 **Testing**:
+
 ```python
 refine = args.box_refine  # True (always full model)
 ```
@@ -1528,46 +1611,54 @@ refine = args.box_refine  # True (always full model)
 
 ---
 
-# Common Usage Patterns
+## Common Usage Patterns
 
-## Train from Scratch
+### Train from Scratch
+
 ```bash
 python train.py --dataset_dir ./data --epoch 101 --gpu 0
 ```
 
-## Resume Training
+### Resume Training
+
 ```bash
 python train.py --pretrain ../experiment/.../checkpoints/latest_model_50.pt --start_epoch 51
 ```
 
-## Evaluation Only
+### Evaluation Only
+
 ```bash
 python train.py --skip_train 1 --pretrain ../experiment/.../checkpoints/loss_model_best.pt
 ```
 
-## Debug Mode
+### Debug Mode
+
 ```bash
 python train.py --debug 1 --epoch 6
 ```
+
 - Uses validation set for training (faster)
 - Only 6 epochs
 - Appends "_debug" to experiment name
 
-## Test with Ground Truth Boxes
+### Test with Ground Truth Boxes
+
 ```bash
 python train.py --gt_box 1 --skip_train 1 --pretrain ...
 ```
+
 - Uses ground truth boxes (oracle experiment)
 - Tests upper bound of layout generation
 
 ---
 
-# Files Generated
+## Files Generated
 
-## During Training
+### During Training
 
 **Directory structure**:
-```
+
+```text
 ../experiment/2026-01-28/DeepLayout_2026-01-28_14-30-45/
 ├── checkpoints/
 │   ├── latest_model_1.pt            # Most recent (epoch 1)
@@ -1589,23 +1680,26 @@ python train.py --gt_box 1 --skip_train 1 --pretrain ...
 
 ---
 
-# Configuration Tips
+## Configuration Tips
 
-## For Faster Training
+### For Faster Training
+
 ```bash
 --nsample 25         # Reduce sample points (4x faster)
 --batch_size 40      # Increase batch size (if memory allows)
 --save_interval 10   # Save less frequently
 ```
 
-## For Better Accuracy
+### For Better Accuracy
+
 ```bash
 --learning_rate 1e-4    # Higher LR (if stable)
 --nsample 100           # More sample points (default)
 --loss_refine 1         # Apply geometric losses to refined boxes
 ```
 
-## For Debugging
+### For Debugging
+
 ```bash
 --debug 1           # Use validation set, only 6 epochs
 --gene_layout 0     # Disable layout generation
@@ -1614,24 +1708,24 @@ python train.py --gt_box 1 --skip_train 1 --pretrain ...
 
 ---
 
-# Quick Reference: Important Line Numbers
+## Quick Reference: Important Line Numbers
 
-| Feature | Line(s) | Description |
-|---------|---------|-------------|
-| LR warmup | 299-304 | 3-epoch warmup schedule |
-| Refine activation | 332 | `epoch>2` check for two-stage |
-| Loss weight schedule | 355 | 31-epoch gradual weights |
-| Gene_ce loss | 361-385 | Gradual weighting with NaN checks |
-| Box_ref_mse loss | 422-429 | Starts epoch 3, gradual weighting |
-| Geometric loss refine | 391, 400, 409, 418 | Add refinement after epoch 2 |
-| Validation callback | 632-669 | CURRENTLY DISABLED! |
-| Gradient clipping | 461 | Clip to max_norm=1.0 |
-| NaN detection | 282-294 | Helper function for debugging |
-| Checkpoint saving | 708-720 | Three types of checkpoints |
+| Feature                | Line(s)             | Description                           |
+| ---------------------- | ------------------- | ------------------------------------- |
+| LR warmup              | 299-304             | 3-epoch warmup schedule               |
+| Refine activation      | 332                 | `epoch>2` check for two-stage         |
+| Loss weight schedule   | 355                 | 31-epoch gradual weights              |
+| Gene_ce loss           | 361-385             | Gradual weighting with NaN checks     |
+| Box_ref_mse loss       | 422-429             | Starts epoch 3, gradual weighting     |
+| Geometric loss refine  | 391, 400, 409, 418  | Add refinement after epoch 2          |
+| Validation callback    | 632-669             | CURRENTLY DISABLED!                   |
+| Gradient clipping      | 461                 | Clip to max_norm=1.0                  |
+| NaN detection          | 282-294             | Helper function for debugging         |
+| Checkpoint saving      | 708-720             | Three types of checkpoints            |
 
 ---
 
-# Next Steps
+## Next Steps
 
 1. **Fix validation data**: Regenerate `data_valid.mat` with correct vocabulary
 2. **Monitor training**: Use TensorBoard to track losses and gradients
@@ -1641,4 +1735,4 @@ python train.py --gt_box 1 --skip_train 1 --pretrain ...
 
 ---
 
-*End of train.py explanation*
+### End of train.py explanation

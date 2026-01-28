@@ -24,7 +24,7 @@ import model.box_utils as box_utils
 from model.graph import GraphTripleConv, GraphTripleConvNet
 from model.layout import boxes_to_layout, masks_to_layout, boxes_to_seg, masks_to_seg
 from model.layers import build_mlp,build_cnn
-from model.utils import vocab
+from model.utils import get_vocab
 
 class Model(nn.Module):
   def __init__(self,
@@ -41,7 +41,7 @@ class Model(nn.Module):
               # refinement_net
               refinement_dims=(1024, 512, 256, 128, 64),
               # box_refine
-              box_refine_arch = "I18,C3-64-2,C3-128-2,C3-256-2",
+              box_refine_arch = None,  # Will be set dynamically based on num_objs
               roi_output_size = (8,8),
               roi_spatial_scale = 1.0/8.0,
               roi_cat_feature = True,
@@ -53,10 +53,16 @@ class Model(nn.Module):
               ):
     super(Model, self).__init__()
     ''' embedding '''
+    vocab = get_vocab()
     self.vocab = vocab
     num_objs = len(vocab['object_idx_to_name'])
     num_preds = len(vocab['pred_idx_to_name'])
     num_doors = len(vocab['door_idx_to_name'])
+    
+    # Set box_refine_arch dynamically based on num_objs if not provided
+    if box_refine_arch is None:
+        box_refine_arch = f"I{num_objs},C3-64-2,C3-128-2,C3-256-2"
+    
     self.obj_embeddings = nn.Embedding(num_objs, embedding_dim)
     self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
     self.image_size = image_size
@@ -173,6 +179,23 @@ class Model(nn.Module):
       print(f"         → Created obj_to_img: {obj_to_img.shape}")
     
     ''' embedding '''
+    # CRITICAL FIX: Validate room indices are in valid range [0, num_objs-1]
+    # Data has indices [0,1,2,3,15] but should be remapped to [0,1,2,3,4]
+    num_objs = self.obj_embeddings.num_embeddings
+    if (objs >= num_objs).any() or (objs < 0).any():
+        # Apply remapping for any out-of-range indices
+        index_map = self.vocab['data_idx_to_model_idx']
+        objs_remapped = torch.zeros_like(objs)
+        for i, obj_idx in enumerate(objs):
+            obj_idx_val = obj_idx.item()
+            if obj_idx_val in index_map:
+                objs_remapped[i] = index_map[obj_idx_val]
+            else:
+                # Clamp to valid range as fallback
+                objs_remapped[i] = torch.clamp(obj_idx, 0, num_objs - 1)
+        objs = objs_remapped
+        print(f"         → Remapped room indices to valid range [0, {num_objs-1}]")
+    
     print(f"         → Step 1: Embedding objects and predicates...")
     obj_vecs = self.obj_embeddings(objs)
     pred_vecs = self.pred_embeddings(p)

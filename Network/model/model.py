@@ -15,10 +15,10 @@
 # limitations under the License.
 
 import math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision.ops import RoIAlign
+import torch # type: ignore
+import torch.nn as nn # type: ignore
+import torch.nn.functional as F # type: ignore
+from torchvision.ops import RoIAlign # type: ignore
 
 import model.box_utils as box_utils
 from model.graph import GraphTripleConv, GraphTripleConvNet

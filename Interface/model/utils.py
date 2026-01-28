@@ -1,6 +1,7 @@
 import numpy as np
 
 # index,name,type(private/public),floorTexture
+# Full room labels for visualization/UI (indices 0-17)
 room_label = [(0, 'LivingRoom', 1, "PublicArea",[220, 213, 205]),
               (1, 'MasterRoom', 0, "Bedroom",[138, 113, 91]),
               (2, 'Kitchen', 1, "FunctionArea",[244, 245, 247]),
@@ -19,6 +20,9 @@ room_label = [(0, 'LivingRoom', 1, "PublicArea",[220, 213, 205]),
               (15, 'FrontDoor', 0, "FrontDoor",[255,255,0]),
               (16, 'InteriorWall', 0, "InteriorWall",[128,128,128]),
               (17, 'InteriorDoor', 0, "InteriorDoor",[255,255,255])]
+
+# Alias for backward compatibility
+room_label_original = room_label
 
 # color palette for nyu40 labels
 def create_color_palette():
@@ -307,24 +311,14 @@ def point_box_relation(u,vbox):
     return relation
 
 def get_vocab():
+    # Updated vocabulary to match retrained model - 5 room types only
+    # Data has sparse indices [0, 1, 2, 3, 15], remapped to contiguous [0, 1, 2, 3, 4]
     room_label = [(0, 'LivingRoom', 1, "PublicArea"),
               (1, 'MasterRoom', 0, "Bedroom"),
               (2, 'Kitchen', 1, "FunctionArea"),
               (3, 'Bathroom', 0, "FunctionArea"),
-              (4, 'DiningRoom', 1, "FunctionArea"),
-              (5, 'ChildRoom', 0, "Bedroom"),
-              (6, 'StudyRoom', 0, "Bedroom"),
-              (7, 'SecondRoom', 0, "Bedroom"),
-              (8, 'GuestRoom', 0, "Bedroom"),
-              (9, 'Balcony', 1, "PublicArea"),
-              (10, 'Entrance', 1, "PublicArea"),
-              (11, 'Storage', 0, "PublicArea"),
-              (12, 'Wall-in', 0, "PublicArea"),
-              (13, 'External', 0, "External"),
-              (14, 'ExteriorWall', 0, "External"),
-              (15, 'FrontDoor', 1, "Entrance"),
-              (16, 'InteriorWall', 0, "Internal"),
-              (17, 'InteriorDoor', 0, "Internal")]
+              (15, 'FrontDoor', 1, "Entrance")  # Index 15 in data → remapped to 4
+    ]
     
     predicates = [
         'left-above',
@@ -358,12 +352,18 @@ def get_vocab():
         'pred_idx_to_name':[],
         'pred_name_to_idx':{},
         'door_idx_to_name':[],
-        'door_name_to_idx':{}
+        'door_name_to_idx':{},
+        'data_idx_to_model_idx':{}  # Maps data indices (sparse) to model indices (contiguous)
     }
     
-    vocab['object_name_to_idx'] = { label:index for index,label,_,_ in room_label[:] }
-    vocab['object_to_idx'] = {str(index):index for index,lable,_,_ in room_label}
-    vocab['object_idx_to_name'] = [label for index,label,_,_ in room_label]
+    # Create remapping: data index → contiguous model index
+    # Data has [0, 1, 2, 3, 15] → remap to [0, 1, 2, 3, 4]
+    for model_idx, (data_idx, label, _, _) in enumerate(room_label):
+        vocab['data_idx_to_model_idx'][data_idx] = model_idx
+        vocab['object_name_to_idx'][label] = model_idx  # Use contiguous indices
+    
+    vocab['object_to_idx'] = {str(model_idx): model_idx for model_idx in range(len(room_label))}
+    vocab['object_idx_to_name'] = [label for _, label, _, _ in room_label]
     vocab['pred_idx_to_name'] = [p for i,p in enumerate(predicates)]
     vocab['pred_name_to_idx'] = {p:i for i,p in enumerate(predicates)}
     vocab['door_idx_to_name'] = [p for i,p in enumerate(door_pos)]

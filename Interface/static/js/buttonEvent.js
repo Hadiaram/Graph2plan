@@ -1131,6 +1131,10 @@ function CreateLeftGraph(rooms, roomID) {
 
         // Show Floor Plan visualization button
         document.getElementById("ShowFloorPlan").style.display = "block";
+
+        // Show Refine button for debugging refinement
+        document.getElementById("refineButton").style.display = "block";
+
         document.getElementById("ShowFloorPlan").onclick = function () {
             console.log("Showing current floor plan...");
 
@@ -1384,6 +1388,70 @@ function CreateLeftGraph(rooms, roomID) {
                 }
 
             }
+
+        // NEW: Refine button handler for debugging refinement
+        document.getElementById("refineButton").onclick = function () {
+            var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
+            var hsname;
+            if (arr = document.cookie.match(reg))
+                hsname = arr[2];
+
+            if (!hsname) {
+                alert("Please save a floor plan first!");
+                return;
+            }
+
+            var userRoomID = hsname.split(".")[0] + ".png.mat";
+            var threshold = 8.0; // Default threshold
+
+            // Show loading state
+            var refineBtn = document.getElementById("refineButton");
+            var originalText = refineBtn.innerHTML;
+            refineBtn.innerHTML = "⏳ Refining...";
+            refineBtn.style.backgroundColor = "#757575";
+            refineBtn.style.cursor = "wait";
+
+            console.log("[Refine Button] Calling refinement for:", userRoomID);
+
+            // Call the refinement endpoint
+            $.get("/index/Refine_Floorplan/", {
+                'userRoomID': userRoomID,
+                'threshold': threshold
+            }, function (data) {
+                // Reset button state
+                refineBtn.innerHTML = originalText;
+                refineBtn.style.backgroundColor = "#ff6f00";
+                refineBtn.style.cursor = "pointer";
+
+                if (data.success) {
+                    console.log("[Refine Button] Success!", data);
+                    var stats = data.statistics;
+                    var message = "✅ Refinement Complete!\n\n" +
+                                "Method: " + data.method + "\n" +
+                                "Threshold: " + data.threshold + "px\n\n" +
+                                "Boxes changed: " + stats.boxes_changed + "/" + stats.total_boxes + "\n" +
+                                "Avg displacement: " + stats.avg_displacement.toFixed(2) + "px\n" +
+                                "Max displacement: " + stats.max_displacement.toFixed(2) + "px";
+
+                    alert(message);
+
+                    // Optional: Reload the layout to show refined boxes
+                    // You can add code here to refresh the display
+                } else {
+                    console.error("[Refine Button] Failed:", data.error);
+                    alert("❌ Refinement failed:\n" + data.error);
+                }
+            }).fail(function(xhr, status, error) {
+                // Reset button state
+                refineBtn.innerHTML = originalText;
+                refineBtn.style.backgroundColor = "#ff6f00";
+                refineBtn.style.cursor = "pointer";
+
+                console.error("[Refine Button] Request failed:", error);
+                alert("❌ Refinement request failed:\n" + error);
+            });
+        };
+
         // }); // COMMENTED OUT: This was closing the automatic AdjustGraph AJAX call above
 
     });

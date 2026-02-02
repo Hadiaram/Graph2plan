@@ -46,6 +46,11 @@ def boxes_to_layout(vecs, boxes, obj_to_img, H, W=None, pooling='sum'):
   if W is None:
     W = H
 
+  # Handle empty input (no objects)
+  if O == 0:
+    dtype, device = vecs.dtype, vecs.device
+    return torch.zeros(1, D, H, W, dtype=dtype, device=device)
+
   grid = _boxes_to_grid(boxes, H, W)
 
   # If we don't add extra spatial dimensions here then out-of-bounds
@@ -78,6 +83,14 @@ def masks_to_layout(vecs, boxes, masks, obj_to_img, H, W=None, pooling='sum'):
   - out: Tensor of shape (N, D, H, W)
   """
   O, D = vecs.size()
+  
+  # Handle empty input (no objects)
+  if O == 0:
+    dtype, device = vecs.dtype, vecs.device
+    if W is None:
+      W = H
+    return torch.zeros(1, D, H, W, dtype=dtype, device=device)
+  
   M = masks.size(1)
   assert masks.size() == (O, M, M)
   if W is None:
@@ -145,6 +158,12 @@ def _pool_samples(samples, obj_to_img, pooling='sum'):
   """
   dtype, device = samples.dtype, samples.device
   O, D, H, W = samples.size()
+  
+  # Handle empty samples (no objects)
+  if O == 0 or obj_to_img.numel() == 0:
+    # Return empty tensor with batch size 1
+    return torch.zeros(1, D, H, W, dtype=dtype, device=device)
+  
   N = obj_to_img.data.max().item() + 1
   
   # Use scatter_add to sum the sampled outputs for each image

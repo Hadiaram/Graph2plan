@@ -8,8 +8,9 @@ from model.utils import *
 
 class FloorPlan():
 
-    def __init__(self, data, rot=None,fliplr=False):
+    def __init__(self, data, rot=None, fliplr=False, index=None):
         self.data = copy.deepcopy(data)
+        self.index = index  # Store index for fallback name generation
 
         # Compatibility layer: convert new format to old format if needed
         self._ensure_compatibility()
@@ -38,7 +39,17 @@ class FloorPlan():
         - gtBoxNew: (N, 4) array with [x0, y0, x1, y1]
         - rType: (N,) array with room types
         - rEdge: (E, 3) array with edges
+        
+        Test data has different structure (topK, tf) - needs special handling
         """
+        # Check if this is test data (has topK but no box/gtBoxNew)
+        if hasattr(self.data, 'topK') and not hasattr(self.data, 'box') and not hasattr(self.data, 'gtBoxNew'):
+            # This is test/retrieval data - create empty placeholders
+            self.data.gtBoxNew = np.zeros((0, 4), dtype=float)
+            self.data.rType = np.array([], dtype=int)
+            self.data.rEdge = np.zeros((0, 3), dtype=int)
+            return
+        
         if not hasattr(self.data, 'gtBoxNew') and hasattr(self.data, 'box'):
             # Extract box coordinates and room types from combined 'box' array
             box_data = self.data.box
@@ -136,6 +147,13 @@ class FloorPlan():
         return box
 
     def get_rooms(self, tensor=True):
+        # Handle test data which may have empty rType
+        if not hasattr(self.data, 'rType') or len(self.data.rType) == 0:
+            rooms = np.array([], dtype=np.int64)
+            if tensor: 
+                rooms = torch.tensor(rooms).long()
+            return rooms
+        
         rooms = self.data.rType
         
         # Remap sparse data indices [0,1,2,3,15] to contiguous model indices [0,1,2,3,4]
@@ -147,6 +165,13 @@ class FloorPlan():
         return rooms
 
     def get_attributes(self, gsize=5, alevel=10, relative=True, tensor=True):
+        # Handle test data which may have empty boxes
+        if not hasattr(self.data, 'gtBoxNew') or len(self.data.gtBoxNew) == 0:
+            attributes = np.zeros((0, gsize*gsize+alevel), dtype=np.float32)
+            if tensor:
+                attributes = torch.tensor(attributes).float()
+            return attributes
+        
         boxes = self.data.gtBoxNew[:,[1,0,3,2]]
         boundary = self.data.boundary[:,:2]
 
@@ -176,6 +201,13 @@ class FloorPlan():
         return attributes
 
     def get_triples(self, random=False, tensor=True):
+        # Handle test data which may have empty boxes/edges
+        if not hasattr(self.data, 'gtBoxNew') or len(self.data.gtBoxNew) == 0:
+            triples = np.array([]).reshape(0, 3).astype(int)
+            if tensor:
+                triples = torch.tensor(triples).long()
+            return triples
+        
         boxes = self.data.gtBoxNew[:, [1, 0, 3, 2]]
         vocab = get_vocab()
 
@@ -250,6 +282,12 @@ class FloorPlan():
 
         cv2.fillPoly(img, (boundary//2).astype(np.int32).reshape(1, -1, 2), 0)
 
+        # Handle test data which may have empty boxes
+        if not hasattr(self.data, 'gtBoxNew') or len(self.data.gtBoxNew) == 0:
+            if tensor:
+                img = torch.tensor(img).long()
+            return img
+        
         order = (self.data.order-1).astype(int)
         rType = self.data.rType[order]
         rBox = self.data.gtBoxNew[order]
@@ -271,6 +309,13 @@ class FloorPlan():
         return img
 
     def get_boxes(self,relative=True,tensor=True):
+        # Handle test data which may have empty boxes
+        if not hasattr(self.data, 'gtBoxNew') or len(self.data.gtBoxNew) == 0:
+            boxes = np.zeros((0, 4), dtype=np.float32)
+            if tensor:
+                boxes = torch.tensor(boxes).float()
+            return boxes
+        
         boxes = self.data.gtBoxNew[:, [1, 0, 3, 2]]
         boundary = self.data.boundary[:,:2]
         
@@ -314,7 +359,8 @@ class FloorPlan():
         return coords
 
     def get_test_data(self, tensor=True):
-        name = self.data.name
+        # Handle test data which may not have 'name' attribute
+        name = self.data.name if hasattr(self.data, 'name') else f'sample_{self.index}'
 
         boundary = self.get_input_boundary(tensor=tensor)
         inside_box = self.get_inside_box(tensor=tensor)
@@ -324,7 +370,8 @@ class FloorPlan():
         return boundary, inside_box, rooms, attrs, triples, name
 
     def get_train_data(self, tensor=True):
-        name = self.data.name
+        # Handle test data which may not have 'name' attribute
+        name = self.data.name if hasattr(self.data, 'name') else f'sample_{self.index}'
 
         boundary = self.get_input_boundary(tensor=tensor)
         inside_box = self.get_inside_box(tensor=tensor)
@@ -354,10 +401,10 @@ class FloorPlanDataset(Dataset):
         if self.train:
             rot = np.random.randint(0,4)
             fliplr = np.random.random()>0.5
-            fp = FloorPlan(self.data[i],rot=rot,fliplr=fliplr)
+            fp = FloorPlan(self.data[i], rot=rot, fliplr=fliplr, index=i)
             return fp.get_train_data()
         else:
-            fp = FloorPlan(self.data[i])
+            fp = FloorPlan(self.data[i], index=i)
             return fp.get_train_data()
     
 def floorplan_collate_fn(batch):

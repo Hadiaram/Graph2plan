@@ -16,6 +16,12 @@ from model.decorate import *
 import math
 import pandas as pd # type: ignore
 import warnings
+import sys
+from pathlib import Path
+
+# Add parent directory to path for PostProcess imports
+GRAPH2PLAN_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(GRAPH2PLAN_ROOT))
 
 # Try to import MATLAB - make it optional
 HAS_MATLAB = False
@@ -24,6 +30,16 @@ try:
     HAS_MATLAB = True
 except ImportError:
     warnings.warn("MATLAB engine not available. Some features may be limited.", UserWarning)
+
+# Try to import Python refinement
+HAS_PYTHON_REFINEMENT = False
+try:
+    from PostProcess.refinement.integration import align_fp_python
+    HAS_PYTHON_REFINEMENT = True
+    print("[Init] Python geometric refinement loaded successfully ✓")
+except ImportError as e:
+    print(f"[Init] Python refinement not available: {e}")
+    warnings.warn("Python refinement not available. Will use MATLAB or basic fallback.", UserWarning)
 
 global test_data, test_data_topk, testNameList, trainNameList
 global train_data, trainTF, train_data_eNum, train_data_rNum
@@ -1088,19 +1104,52 @@ def Save_Editbox(request):
     fp_end.data.refineBox=np.array(Box)
     fp_end.data.rEdge=np.array(Edge)
 
-    if engview is not None and HAS_MATLAB:
-        # Use MATLAB alignment
-        boundary_mat = matlab.double(boundary)
-        rType_mat = matlab.double(rType.tolist())
-        Edge_mat = matlab.double(Edge)
-        Box_mat = matlab.double(Box)
-        box_refine = engview.align_fp(boundary_mat, Box_mat,  rType_mat, Edge_mat, 18, False, nargout=3)
-        box_out = box_refine[0]
-        box_order = box_refine[1]
-        rBoundary = box_refine[2]
-    else:
-        # Use Python fallback
+    # Try Python refinement first (HAS_PYTHON_REFINEMENT is set at module init)
+    refinement_method = "none"
+
+    if HAS_PYTHON_REFINEMENT:
+        try:
+            print(f"[Refinement] Using Python geometric refinement for {userRoomID}")
+            box_out, box_order, rBoundary = align_fp_python(
+                boundary=np.array(boundary),
+                boxes=np.array(Box),
+                room_types=rType,
+                edges=np.array(Edge),
+                fp_id=userRoomID,  # FIX: Use userRoomID instead of undefined fp_id
+                threshold=8.0,
+                draw_result=False
+            )
+            refinement_method = "python"
+            print(f"[Refinement] ✓ Python refinement successful! Got {len(box_out)} boxes")
+
+        except Exception as e:
+            print(f"[Refinement] ✗ Python refinement failed: {e}")
+            print("[Refinement] Falling back to MATLAB...")
+
+    if refinement_method == "none" and engview is not None and HAS_MATLAB:
+        try:
+            print(f"[Refinement] Using MATLAB alignment for {userRoomID}")
+            # Use MATLAB alignment
+            boundary_mat = matlab.double(boundary)
+            rType_mat = matlab.double(rType.tolist())
+            Edge_mat = matlab.double(Edge)
+            Box_mat = matlab.double(Box)
+            box_refine = engview.align_fp(boundary_mat, Box_mat,  rType_mat, Edge_mat, 18, False, nargout=3)
+            box_out = box_refine[0]
+            box_order = box_refine[1]
+            rBoundary = box_refine[2]
+            refinement_method = "matlab"
+            print(f"[Refinement] ✓ MATLAB refinement successful!")
+
+        except Exception as e:
+            print(f"[Refinement] ✗ MATLAB failed: {e}")
+
+    if refinement_method == "none":
+        print(f"[Refinement] Using basic Python fallback for {userRoomID}")
+        # Use Python fallback as last resort
         box_out, box_order, rBoundary = _python_fallback_align(boundary, Box, rType.tolist(), Edge, 18)
+        refinement_method = "fallback"
+
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]
@@ -1108,6 +1157,157 @@ def Save_Editbox(request):
     sio.savemat("./static/" + userRoomID + ".mat", {"data": fp_end.data})
     flag=1
     return HttpResponse(json.dumps(flag), content_type="application/json")
+
+
+def Refine_Floorplan(request):
+    """
+    NEW ENDPOINT: Manual refinement trigger for debugging.
+
+    This endpoint can be called from a button in the interface to
+    re-run refinement on an existing floor plan.
+
+    GET parameters:
+        - userRoomID: Floor plan identifier
+        - threshold: (optional) Refinement threshold in pixels (default: 8.0)
+        - method: (optional) Force method: 'python', 'matlab', or 'fallback'
+
+    Returns:
+        JSON with refinement results and statistics
+    """
+    userRoomID = request.GET.get("userRoomID")
+    threshold = float(request.GET.get("threshold", "8.0"))
+    force_method = request.GET.get("method", None)  # Optional: force a specific method
+
+    if not userRoomID:
+        return JsonResponse({
+            "success": False,
+            "error": "userRoomID parameter required"
+        }, status=400)
+
+    try:
+        # Load the saved floor plan data
+        mat_path = f"./static/{userRoomID}.mat"
+        if not os.path.exists(mat_path):
+            return JsonResponse({
+                "success": False,
+                "error": f"Floor plan {userRoomID} not found"
+            }, status=404)
+
+        data = sio.loadmat(mat_path)
+        fp_data = data['data'][0, 0]
+
+        # Extract necessary data
+        boundary = fp_data['boundary']
+        boxes = fp_data['refineBox']  # Original boxes before refinement
+        room_types = fp_data['rType'].flatten()
+        edges = fp_data['rEdge']
+
+        print(f"\n[Manual Refine] Processing {userRoomID}")
+        print(f"  Boxes: {len(boxes)}, Threshold: {threshold}px, Force method: {force_method}")
+
+        # Run refinement based on method preference
+        refinement_method = "none"
+        box_out = None
+        box_order = None
+        rBoundary = None
+        error_msg = None
+
+        # Try Python refinement
+        if (force_method is None or force_method == "python") and HAS_PYTHON_REFINEMENT:
+            try:
+                print(f"[Manual Refine] Trying Python refinement...")
+                box_out, box_order, rBoundary = align_fp_python(
+                    boundary=boundary,
+                    boxes=boxes,
+                    room_types=room_types,
+                    edges=edges,
+                    fp_id=f"{userRoomID}_manual",
+                    threshold=threshold,
+                    draw_result=False
+                )
+                refinement_method = "python"
+                print(f"[Manual Refine] ✓ Python refinement successful!")
+
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[Manual Refine] ✗ Python refinement failed: {e}")
+
+        # Try MATLAB if Python failed or was forced
+        if refinement_method == "none" and (force_method is None or force_method == "matlab") and HAS_MATLAB:
+            try:
+                print(f"[Manual Refine] Trying MATLAB refinement...")
+                boundary_mat = matlab.double(boundary.tolist())
+                rType_mat = matlab.double(room_types.tolist())
+                Edge_mat = matlab.double(edges.tolist())
+                Box_mat = matlab.double(boxes.tolist())
+                box_refine = engview.align_fp(boundary_mat, Box_mat, rType_mat, Edge_mat, int(threshold), False, nargout=3)
+                box_out = box_refine[0]
+                box_order = box_refine[1]
+                rBoundary = box_refine[2]
+                refinement_method = "matlab"
+                print(f"[Manual Refine] ✓ MATLAB refinement successful!")
+
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[Manual Refine] ✗ MATLAB refinement failed: {e}")
+
+        # Try fallback if everything else failed
+        if refinement_method == "none":
+            try:
+                print(f"[Manual Refine] Using basic Python fallback...")
+                box_out, box_order, rBoundary = _python_fallback_align(
+                    boundary, boxes, room_types.tolist(), edges, threshold
+                )
+                refinement_method = "fallback"
+                print(f"[Manual Refine] ✓ Fallback refinement complete")
+
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[Manual Refine] ✗ Fallback failed: {e}")
+                return JsonResponse({
+                    "success": False,
+                    "error": f"All refinement methods failed. Last error: {error_msg}"
+                }, status=500)
+
+        # Calculate statistics
+        original_boxes_np = np.array(boxes)
+        refined_boxes_np = np.array(box_out)
+
+        # Count how many boxes changed
+        boxes_changed = 0
+        total_displacement = 0
+        for i in range(len(original_boxes_np)):
+            orig = original_boxes_np[i]
+            refined = refined_boxes_np[i]
+            displacement = np.sqrt(np.sum((orig - refined) ** 2))
+            if displacement > 0.1:  # Threshold for "changed"
+                boxes_changed += 1
+            total_displacement += displacement
+
+        avg_displacement = total_displacement / len(boxes)
+
+        # Return results
+        return JsonResponse({
+            "success": True,
+            "method": refinement_method,
+            "threshold": threshold,
+            "statistics": {
+                "total_boxes": len(boxes),
+                "boxes_changed": int(boxes_changed),
+                "avg_displacement": float(avg_displacement),
+                "max_displacement": float(np.max([np.sqrt(np.sum((original_boxes_np[i] - refined_boxes_np[i]) ** 2))
+                                                  for i in range(len(boxes))]))
+            },
+            "message": f"Refinement complete using {refinement_method} method"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            "success": False,
+            "error": str(e)
+        }, status=500)
 
 
 def TransGraph_net(request):

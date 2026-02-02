@@ -38,6 +38,7 @@ urlpatterns = [
     path(r'index/GraphSearch/', views.GraphSearch),
     path(r'index/RelBox/', views.RelBox),
     path(r'index/Save_Editbox/', views.Save_Editbox),
+    path('index/Refine_Floorplan/', views.Refine_Floorplan),  # NEW: Manual refinement button
 
     path('home', views.home),
 

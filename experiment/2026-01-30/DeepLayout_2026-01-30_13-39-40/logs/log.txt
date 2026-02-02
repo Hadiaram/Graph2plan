@@ -1,0 +1,98 @@
+2026-01-30 13:39:40,767 - root - INFO - python train.py --skip_train 1 --pretrain ../experiment/2026-01-23/DeepLayout_2026-01-23_08-21-58/checkpoints/loss_model_-0.1527.pt --batch_size 20 --box_refine 1 --gene_layout 1
+2026-01-30 13:39:40,767 - root - INFO - Namespace(dataset_dir='./data', image_size=(128, 128), input_dim=3, with_house=False, pos_dim=25, area_dim=10, batch_size=20, workers=8, train_shuffle=True, gene_layout=True, box_refine=True, embedding_dim=128, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True, gt_box=0, relative=1, mutex=1, inside=1, coverage=1, render=1, nsample=100, loss_refine=0, render_refine=0, optimizer='Adam', scheduler='plateau', learning_rate=5e-05, decay_rate=0.0001, step_size=10, step_rate=0.5, grad_clip=1.0, save_interval=5, n_saved=20, pretrain='../experiment/2026-01-23/DeepLayout_2026-01-23_08-21-58/checkpoints/loss_model_-0.1527.pt', skip_train=True, eval_on_valid=0, seed=74269, epoch=101, start_epoch=None, gpu='0', multi_gpu=None, suffix=None, debug=0, test=0, argv='train.py --skip_train 1 --pretrain ../experiment/2026-01-23/DeepLayout_2026-01-23_08-21-58/checkpoints/loss_model_-0.1527.pt --batch_size 20 --box_refine 1 --gene_layout 1')
+2026-01-30 13:39:40,767 - root - INFO - ---------------------------------------------------TRANING---------------------------------------------------
+2026-01-30 13:39:40,767 - root - INFO - Use seed: 74269
+2026-01-30 13:39:41,171 - root - INFO - Namespace(embedding_dim=128, image_size=(128, 128), input_dim=3, attribute_dim=35, refinement_dims=(1024, 512, 256, 128, 64), box_refine_arch=None, roi_cat_feature=True)
+2026-01-30 13:39:41,172 - root - INFO - Model(
+  (obj_embeddings): Embedding(5, 128)
+  (pred_embeddings): Embedding(10, 128)
+  (gconv): GraphTripleConv(
+    (net1): Sequential(
+      (0): Linear(in_features=454, out_features=512, bias=True)
+      (1): LeakyReLU(negative_slope=0.01)
+      (2): Linear(in_features=512, out_features=1152, bias=True)
+      (3): LeakyReLU(negative_slope=0.01)
+    )
+    (net2): Sequential(
+      (0): Linear(in_features=512, out_features=512, bias=True)
+      (1): LeakyReLU(negative_slope=0.01)
+      (2): Linear(in_features=512, out_features=128, bias=True)
+      (3): LeakyReLU(negative_slope=0.01)
+    )
+  )
+  (gconv_net): GraphTripleConvNet(
+    (gconvs): ModuleList(
+      (0-3): 4 x GraphTripleConv(
+        (net1): Sequential(
+          (0): Linear(in_features=384, out_features=512, bias=True)
+          (1): LeakyReLU(negative_slope=0.01)
+          (2): Linear(in_features=512, out_features=1152, bias=True)
+          (3): LeakyReLU(negative_slope=0.01)
+        )
+        (net2): Sequential(
+          (0): Linear(in_features=512, out_features=512, bias=True)
+          (1): LeakyReLU(negative_slope=0.01)
+          (2): Linear(in_features=512, out_features=128, bias=True)
+          (3): LeakyReLU(negative_slope=0.01)
+        )
+      )
+    )
+  )
+  (inside_cnn): Sequential(
+    (0): Sequential(
+      (0): Conv2d(3, 32, kernel_size=(3, 3), stride=(2, 2))
+      (1): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (2): LeakyReLU(negative_slope=0.01)
+      (3): Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2))
+      (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (5): LeakyReLU(negative_slope=0.01)
+      (6): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2))
+      (7): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (8): LeakyReLU(negative_slope=0.01)
+      (9): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2))
+    )
+    (1): AdaptiveAvgPool2d(output_size=1)
+  )
+  (box_net): Sequential(
+    (0): Linear(in_features=384, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=4, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+  (rel_aux_net): Sequential(
+    (0): Linear(in_features=384, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=13, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+  (refinement_net): Sequential(
+    (0): Conv2d(384, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): LeakyReLU(negative_slope=0.01)
+    (3): Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (5): LeakyReLU(negative_slope=0.01)
+    (6): Conv2d(64, 5, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  )
+  (box_refine_backbone): Sequential(
+    (0): Conv2d(5, 64, kernel_size=(3, 3), stride=(2, 2))
+    (1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): LeakyReLU(negative_slope=0.01)
+    (3): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2))
+    (4): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (5): LeakyReLU(negative_slope=0.01)
+    (6): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2))
+  )
+  (roi_align): RoIAlign(output_size=(8, 8), spatial_scale=0.125, sampling_ratio=-1, aligned=False)
+  (down_sample): AdaptiveAvgPool2d(output_size=1)
+  (box_reg): Sequential(
+    (0): Linear(in_features=640, out_features=512, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Linear(in_features=512, out_features=4, bias=True)
+    (3): LeakyReLU(negative_slope=0.01)
+  )
+)
+2026-01-30 13:39:41,735 - root - INFO - Evaluating on test set
+2026-01-30 13:39:41,735 - ignite.engine.engine.Engine - INFO - Engine run starting with max_epochs=1.
+2026-01-30 13:40:00,378 - ignite.engine.engine.Engine - ERROR - Current run is terminating due to exception: max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.
+2026-01-30 13:40:01,038 - ignite.engine.engine.Engine - ERROR - Engine run is terminating due to exception: max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.

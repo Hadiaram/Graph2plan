@@ -87,6 +87,7 @@ def parse_args():
     parser.add_argument('--n_saved', default=20, type=int)
     parser.add_argument('--pretrain', default=None, type=str)
     parser.add_argument('--skip_train', default=0, type=bool_flag)
+    parser.add_argument('--eval_on_valid', default=0, type=bool_flag)  # Evaluate on validation set instead of test
 
     ''' Trainer '''
     parser.add_argument('--seed', default=74269,type=int)
@@ -708,7 +709,7 @@ def main(args):
     # Checkpoint - save_interval moved to event handler attachment
     epoch_saver = ModelCheckpoint(checkpoints_dir, 'epoch', n_saved=args.n_saved, require_empty=False, create_dir=True)  # type: ignore
     latest_saver = ModelCheckpoint(checkpoints_dir, 'latest', score_function=lambda e:e.state.epoch, n_saved=1, require_empty=False, create_dir=True)  # type: ignore
-    loss_saver = ModelCheckpoint(checkpoints_dir, 'loss', score_function=lambda e:-e.state.output['loss']['total_loss'], n_saved=1, require_empty=False, create_dir=True)  # type: ignore
+    loss_saver = ModelCheckpoint(checkpoints_dir, 'loss', score_function=lambda e:-e.state.output['total_loss'], n_saved=1, require_empty=False, create_dir=True)  # type: ignore
 
     trainer.add_event_handler(Events.EPOCH_COMPLETED, latest_saver, {'model': model,'opt':optimizer})  # type: ignore
     # Use Events.EPOCH_COMPLETED(every=N) for save_interval
@@ -734,8 +735,11 @@ def main(args):
                 logging.error(f"Invalid room indices in test batch objs: {objs[objs >= 5].tolist() if (objs >= 5).any() else 'none'}")
                 logging.error(f"Batch name: {name}")
                 logging.error(f"All objs: {objs.tolist()}")
-                # Skip this batch
-                return {}
+                # Return empty predictions to avoid KeyError in metrics
+                return {
+                    'pred': [torch.empty(0, 4).to(objs.device), None, None],
+                    'gt': [layout, torch.empty(0, 4).to(objs.device)]
+                }
             
             # CRITICAL: Also check layout tensor (segmentation map)
             # Layout can have indices 0-4 (rooms) and 5 (background/boundary - ignored in loss)
@@ -860,9 +864,28 @@ def main(args):
             f.write(str(metrics))
 
     if not args.skip_train:
-        test_evaluator.run(valid_loader)
+        # NOTE: Automatic post-training evaluation disabled due to incompatible validation dataset
+        # The data_valid.mat file is from old RPLAN dataset (Jan 7, 2026), not ResPlan
+        # To evaluate: run with --skip_train 1 and use test data
+        logging.info("Training complete. Skipping post-training evaluation (incompatible validation dataset).")
+        logging.info("To evaluate model: python train.py --skip_train 1 --pretrain <checkpoint_path> --batch_size 20")
     else:
-        test_evaluator.run(test_loader)
+        # Use validation data if requested or if test data is unavailable
+        if args.eval_on_valid:
+            logging.info("Evaluating on validation set (--eval_on_valid 1)")
+            test_evaluator.run(valid_loader)
+        else:
+            logging.warning("="*80)
+            logging.warning("WARNING: Test data may be incomplete or corrupted.")
+            logging.warning("Consider using --eval_on_valid 1 to evaluate on validation set instead.")
+            logging.warning("="*80)
+            try:
+                logging.info("Attempting to evaluate on test set...")
+                test_evaluator.run(test_loader)
+            except Exception as e:
+                logging.error(f"Test evaluation failed: {e}")
+                logging.error("Falling back to validation set evaluation")
+                test_evaluator.run(valid_loader)
     with open(f'{output_dir}/output_{start_time}.pkl','wb') as f:
         pickle.dump(output,f,pickle.HIGHEST_PROTOCOL)
 

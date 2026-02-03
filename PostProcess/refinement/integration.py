@@ -64,7 +64,7 @@ def align_fp_python(boundary: np.ndarray,
         boundary,
         threshold=threshold,
         room_types=room_types,
-        verbose=False
+        verbose=True  # Enable verbose logging to debug
     )
 
     n_updated = sum(1 for edges_dict in updated_edges if any(edges_dict.values()))
@@ -93,12 +93,9 @@ def align_fp_python(boundary: np.ndarray,
     # TODO: Implement proper polygon generation with boundary cropping
     # For now, create simple rectangular polygons from boxes
 
-    # Simple ordering by area (largest first, like MATLAB)
-    areas = [(box[2] - box[0]) * (box[3] - box[1]) for box in final_boxes]
-    order_indices = np.argsort(areas)[::-1]  # Descending order
-
-    # Convert to MATLAB-style 1-indexed order (as nested lists)
-    order = [[int(idx) + 1] for idx in order_indices]
+    # Preserve original order (don't sort by area to maintain hierarchy)
+    # MATLAB-style 1-indexed order (as nested lists)
+    order = [[int(i) + 1] for i in range(len(final_boxes))]
 
     # Generate simple rectangular room boundaries
     room_boundaries = []
@@ -151,7 +148,7 @@ def align_fp_matlab_compatible(boundary, boxes, room_types, edges, fp_id,
     # Convert MATLAB types to NumPy if needed
     try:
         # Try to import matlab to check if we have MATLAB types
-        import matlab
+        import matlab # type: ignore
 
         if isinstance(boundary, matlab.double):
             boundary = np.array(boundary)

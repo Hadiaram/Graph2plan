@@ -29,16 +29,17 @@ urlpatterns = [
 
     path('index/LoadTestBoundary', views.LoadTestBoundary),
     path('index/NumSearch/', views.NumSearch),
-    path(r'index/LoadTrainHouse/', views.LoadTrainHouse),
-    path(r'index/TransGraph/', views.TransGraph),
-    path(r'index/TransGraph_net/', views.TransGraph_net),
-    path(r'index/Init/', views.Init),
-    path(r'index/AdjustGraph/', views.AdjustGraph),
-    path(r'index/AutoAdjustGraph/', views.AutoAdjustGraph),
-    path(r'index/GraphSearch/', views.GraphSearch),
-    path(r'index/RelBox/', views.RelBox),
-    path(r'index/Save_Editbox/', views.Save_Editbox),
-    path('index/Refine_Floorplan/', views.Refine_Floorplan),  # NEW: Manual refinement button
+    path('index/LoadTrainHouse/', views.LoadTrainHouse),
+    path('index/TransGraph/', views.TransGraph),
+    path('index/TransGraph_net/', views.TransGraph_net),
+    path('index/Init/', views.Init),
+    path('index/AdjustGraph/', views.AdjustGraph),
+    path('index/AutoAdjustGraph/', views.AutoAdjustGraph),
+    path('index/GraphSearch/', views.GraphSearch),
+    path('index/RelBox/', views.RelBox),
+    path('index/Save_Editbox/', views.Save_Editbox),
+    path('index/Refine_Floorplan/', views.Refine_Floorplan),  # Manual refinement button
+    path('index/Export_DXF/', views.Export_DXF),  # Manual DXF export button
 
     path('home', views.home),
 

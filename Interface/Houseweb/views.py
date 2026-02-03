@@ -19,6 +19,16 @@ import warnings
 import sys
 from pathlib import Path
 
+# Try to import DXF export
+HAS_DXF_EXPORT = False
+try:
+    from Houseweb.dxf_export import save_floorplan_dxf
+    HAS_DXF_EXPORT = True
+    print("[Init] DXF export module loaded successfully ✓")
+except ImportError as e:
+    print(f"[Init] DXF export not available: {e}")
+    warnings.warn("DXF export not available. Install ezdxf: pip install ezdxf", UserWarning)
+
 # Add parent directory to path for PostProcess imports
 GRAPH2PLAN_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(GRAPH2PLAN_ROOT))
@@ -50,6 +60,14 @@ global boxes_pred, indxlist
 # Initialize module-level variables
 boxes_pred = None
 indxlist = None
+
+# DXF Export Configuration
+ENABLE_AUTO_DXF_EXPORT = False  # Set to True to auto-save DXF on every save (disabled by default)
+DXF_SCALE = 1.0  # Scale factor (1.0 = pixels, 0.01 = cm, 0.0254 = inches)
+DXF_WALL_THICKNESS = 3.0  # Wall thickness in drawing units
+
+# DXF Save Path
+DXF_SAVE_PATH = r"C:\Users\hmbashir\source\DXF Floor Plans"  # Change this to your desired path
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -920,10 +938,30 @@ def AdjustGraph(request):
         if h != 0:
             tmp = [x, y, x, h + y]
             data_js["windowsline"].append(tmp)
-    
+
+    # Save as .mat file
     mat_filename = "./static/" + testname.split(',')[0].split('.')[0] + ".mat"
     sio.savemat(mat_filename, {"data": fp_end.data})
     print(f"\n💾 [VIEWS] Saved floor plan data to {mat_filename}")
+
+    # Optional: Auto-save as DXF file (disabled by default)
+    if ENABLE_AUTO_DXF_EXPORT and HAS_DXF_EXPORT:
+        try:
+            dxf_filename = "./static/" + testname.split(',')[0].split('.')[0] + ".dxf"
+            success = save_floorplan_dxf(
+                fp_end.data,
+                dxf_filename,
+                scale=DXF_SCALE,
+                wall_thickness=DXF_WALL_THICKNESS,
+                include_labels=True,
+                include_dimensions=False
+            )
+            if success:
+                print(f"💾 [VIEWS] ✓ Auto-saved DXF file: {dxf_filename}")
+            else:
+                print(f"💾 [VIEWS] ✗ Failed to auto-save DXF file")
+        except Exception as e:
+            print(f"💾 [VIEWS] Warning: DXF auto-export failed: {e}")
 
     end = time.perf_counter()
     print(f"\n✅ [VIEWS] AdjustGraph completed successfully: {end - start:.3f} seconds")
@@ -1154,7 +1192,31 @@ def Save_Editbox(request):
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]
     fp_end.data = add_dw_fp(fp_end.data)
-    sio.savemat("./static/" + userRoomID + ".mat", {"data": fp_end.data})
+
+    # Save as .mat file
+    mat_filepath = "./static/" + userRoomID + ".mat"
+    sio.savemat(mat_filepath, {"data": fp_end.data})
+    print(f"[Save] Saved .mat file: {mat_filepath}")
+
+    # Optional: Auto-save as DXF file (disabled by default, controlled by separate button)
+    if ENABLE_AUTO_DXF_EXPORT and HAS_DXF_EXPORT:
+        try:
+            dxf_filepath = "./static/" + userRoomID + ".dxf"
+            success = save_floorplan_dxf(
+                fp_end.data,
+                dxf_filepath,
+                scale=DXF_SCALE,
+                wall_thickness=DXF_WALL_THICKNESS,
+                include_labels=True,
+                include_dimensions=False
+            )
+            if success:
+                print(f"[Save] ✓ Auto-saved DXF file: {dxf_filepath}")
+            else:
+                print(f"[Save] ✗ Failed to auto-save DXF file")
+        except Exception as e:
+            print(f"[Save] Warning: DXF auto-export failed: {e}")
+
     flag=1
     return HttpResponse(json.dumps(flag), content_type="application/json")
 
@@ -1186,11 +1248,12 @@ def Refine_Floorplan(request):
 
     try:
         # Load the saved floor plan data
+        # userRoomID should be the base name (e.g., "14926"), so we need to add .mat extension
         mat_path = f"./static/{userRoomID}.mat"
         if not os.path.exists(mat_path):
             return JsonResponse({
                 "success": False,
-                "error": f"Floor plan {userRoomID} not found"
+                "error": f"Floor plan {userRoomID} not found at {mat_path}"
             }, status=404)
 
         data = sio.loadmat(mat_path)
@@ -1286,7 +1349,36 @@ def Refine_Floorplan(request):
 
         avg_displacement = total_displacement / len(boxes)
 
-        # Return results
+        # Save refined boxes back to the .mat file
+        print(f"[Manual Refine] Saving refined boxes back to {mat_path}...")
+
+        # Reload and update the data structure
+        data['data'][0, 0]['newBox'] = np.array(box_out)
+        data['data'][0, 0]['order'] = np.array(box_order)
+        data['data'][0, 0]['rBoundary'] = np.array([np.array(rb) for rb in rBoundary], dtype=object)
+
+        # Save back to disk
+        sio.savemat(mat_path, data)
+        print(f"[Manual Refine] ✓ Saved refined floor plan to disk")
+
+        # Format data for frontend rendering (same format as AdjustGraph response)
+        roomret = []
+        for k in range(len(box_out)):
+            room_label = mdul.room_label[int(room_types[k])][1]  # Get room type label
+            order_idx = box_order[k][0] - 1 if isinstance(box_order[k], list) else k
+            room_data = (box_out[k], [room_label], order_idx)
+            roomret.append(room_data)
+
+        # Format boundary as exterior string
+        exterior = ""
+        for i in range(len(boundary)):
+            exterior += str(boundary[i][0]) + "," + str(boundary[i][1]) + " "
+        exterior = exterior.strip()
+
+        # Format door (first two boundary points)
+        door = f"{boundary[0][0]},{boundary[0][1]},{boundary[1][0]},{boundary[1][1]}"
+
+        # Return results with rendering data
         return JsonResponse({
             "success": True,
             "method": refinement_method,
@@ -1298,7 +1390,11 @@ def Refine_Floorplan(request):
                 "max_displacement": float(np.max([np.sqrt(np.sum((original_boxes_np[i] - refined_boxes_np[i]) ** 2))
                                                   for i in range(len(boxes))]))
             },
-            "message": f"Refinement complete using {refinement_method} method"
+            "message": f"Refinement complete using {refinement_method} method",
+            # Add rendering data
+            "roomret": roomret,
+            "exterior": exterior,
+            "door": door
         })
 
     except Exception as e:
@@ -1753,6 +1849,142 @@ def retrieve_bf(tf_trainsub, datum, k=20):
         index = np.argpartition(dist, k)[:k]
         index = index[np.argsort(dist[index])]
     return index
+
+
+def Export_DXF(request):
+    """
+    Manual DXF export endpoint - triggered by button click.
+
+    Exports the saved floor plan to DXF format in the network location.
+
+    GET parameters:
+        - userRoomID: Floor plan identifier (e.g., "14926")
+        - scale: (optional) Scale factor (default from config)
+        - filename: (optional) Custom filename (default: userRoomID.dxf)
+
+    Returns:
+        JSON with success status and file path
+    """
+    userRoomID = request.GET.get("userRoomID")
+    custom_scale = request.GET.get("scale", None)
+    custom_filename = request.GET.get("filename", None)
+
+    if not userRoomID:
+        return JsonResponse({
+            "success": False,
+            "error": "userRoomID parameter required"
+        }, status=400)
+
+    if not HAS_DXF_EXPORT:
+        return JsonResponse({
+            "success": False,
+            "error": "DXF export not available. Please install ezdxf: pip install ezdxf"
+        }, status=500)
+
+    try:
+        # Load the .mat file from static directory
+        mat_path = f"./static/{userRoomID}.mat"
+        if not os.path.exists(mat_path):
+            return JsonResponse({
+                "success": False,
+                "error": f"Floor plan {userRoomID}.mat not found in static directory"
+            }, status=404)
+
+        print(f"\n[DXF Export] Loading {mat_path}...")
+        data = sio.loadmat(mat_path)
+        fp_data = data['data'][0, 0]
+
+        # Debug: Check what fields are available
+        print(f"[DXF Export Debug] Available fields: {fp_data.dtype.names}")
+
+        # Debug: Check rType
+        if 'rType' in fp_data.dtype.names:
+            rType_data = fp_data['rType']
+            print(f"[DXF Export Debug] rType shape: {rType_data.shape}, dtype: {rType_data.dtype}")
+            print(f"[DXF Export Debug] rType values: {rType_data.flatten()}")
+        else:
+            print(f"[DXF Export Debug] rType NOT FOUND in .mat file!")
+
+        # Debug: Check rBoundary
+        if 'rBoundary' in fp_data.dtype.names:
+            rBoundary_data = fp_data['rBoundary']
+            print(f"[DXF Export Debug] rBoundary shape: {rBoundary_data.shape}, type: {type(rBoundary_data)}")
+        else:
+            print(f"[DXF Export Debug] rBoundary NOT FOUND in .mat file!")
+
+        # Determine output filename
+        if custom_filename:
+            dxf_filename = custom_filename if custom_filename.endswith('.dxf') else f"{custom_filename}.dxf"
+        else:
+            dxf_filename = f"{userRoomID}.dxf"
+
+        # Ensure network directory exists (create if needed)
+        network_dir = DXF_SAVE_PATH
+        try:
+            os.makedirs(network_dir, exist_ok=True)
+            print(f"[DXF Export] Network directory ready: {network_dir}")
+        except Exception as e:
+            return JsonResponse({
+                "success": False,
+                "error": f"Cannot access network path '{network_dir}': {str(e)}",
+                "suggestion": "Check that N: drive is mapped and accessible"
+            }, status=500)
+
+        # Full output path
+        dxf_path = os.path.join(network_dir, dxf_filename)
+
+        # Determine scale
+        scale = float(custom_scale) if custom_scale else DXF_SCALE
+
+        print(f"[DXF Export] Exporting to {dxf_path}...")
+        print(f"[DXF Export] Scale: {scale}, Wall thickness: {DXF_WALL_THICKNESS}")
+
+        # Export to DXF
+        success = save_floorplan_dxf(
+            fp_data,
+            dxf_path,
+            scale=scale,
+            wall_thickness=DXF_WALL_THICKNESS,
+            include_labels=True,
+            include_dimensions=False
+        )
+
+        if success:
+            file_size = os.path.getsize(dxf_path) / 1024  # KB
+            print(f"[DXF Export] ✓ Successfully exported {dxf_filename} ({file_size:.1f} KB)")
+
+            # Count rooms for summary (flatten rType to get actual count)
+            room_count = 0
+            if 'rType' in fp_data.dtype.names:
+                rType_array = np.array(fp_data['rType']).flatten()
+                room_count = len(rType_array)
+                print(f"[DXF Export] Detected {room_count} rooms")
+
+            return JsonResponse({
+                "success": True,
+                "filename": dxf_filename,
+                "path": dxf_path,
+                "size_kb": round(file_size, 1),
+                "scale": scale,
+                "room_count": room_count,
+                "message": f"DXF file saved successfully to network location"
+            })
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": "DXF export failed (check console for details)"
+            }, status=500)
+
+    except Exception as e:
+        print(f"[DXF Export] ✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+        return JsonResponse({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }, status=500)
 
 
 if __name__ == "__main__":

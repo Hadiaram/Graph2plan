@@ -7,7 +7,7 @@ HAS_MATLAB = False
 eng = None
 try:
     import matlab
-    import matlab.engine as engine
+    import matlab.engine as engine # type: ignore
     eng = engine.start_matlab()
     eng.addpath(os.path.join(os.path.dirname(__file__),'matlab'),nargout=0)
     HAS_MATLAB = True

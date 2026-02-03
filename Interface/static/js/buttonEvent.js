@@ -1134,6 +1134,16 @@ function CreateLeftGraph(rooms, roomID) {
 
         // Show Refine button for debugging refinement
         document.getElementById("refineButton").style.display = "block";
+        console.log("[DEBUG] Refine button shown");
+
+        // Show DXF Export button
+        var dxfButton = document.getElementById("exportDXFButton");
+        if (dxfButton) {
+            dxfButton.style.display = "block";
+            console.log("[DEBUG] DXF Export button shown");
+        } else {
+            console.error("[DEBUG] DXF Export button element not found!");
+        }
 
         document.getElementById("ShowFloorPlan").onclick = function () {
             console.log("Showing current floor plan...");
@@ -1401,8 +1411,9 @@ function CreateLeftGraph(rooms, roomID) {
                 return;
             }
 
-            var userRoomID = hsname.split(".")[0] + ".png.mat";
-            var threshold = 8.0; // Default threshold
+            // Extract base ID: "14926.png" -> "14926"
+            var userRoomID = hsname.split(".")[0];
+            var threshold = 30.0; // Default threshold (increased from 8.0 for better snapping)
 
             // Show loading state
             var refineBtn = document.getElementById("refineButton");
@@ -1435,8 +1446,10 @@ function CreateLeftGraph(rooms, roomID) {
 
                     alert(message);
 
-                    // Optional: Reload the layout to show refined boxes
-                    // You can add code here to refresh the display
+                    // Update the display with refined boxes instead of reloading
+                    console.log("[Refine Button] Updating floor plan display with refined boxes...");
+                    CreateLeftFloorPlan(data.roomret, data.exterior, data.door);
+                    console.log("[Refine Button] ✓ Display updated!");
                 } else {
                     console.error("[Refine Button] Failed:", data.error);
                     alert("❌ Refinement failed:\n" + data.error);
@@ -1449,6 +1462,81 @@ function CreateLeftGraph(rooms, roomID) {
 
                 console.error("[Refine Button] Request failed:", error);
                 alert("❌ Refinement request failed:\n" + error);
+            });
+        };
+
+        // DXF Export button handler
+        document.getElementById("exportDXFButton").onclick = function () {
+            var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
+            var hsname;
+            if (arr = document.cookie.match(reg))
+                hsname = arr[2];
+
+            if (!hsname) {
+                alert("Please save a floor plan first!");
+                return;
+            }
+
+            // Extract base ID: "14926.png" -> "14926"
+            var userRoomID = hsname.split(".")[0];
+
+            // Show loading state
+            var dxfBtn = document.getElementById("exportDXFButton");
+            var originalText = dxfBtn.innerHTML;
+            dxfBtn.innerHTML = "⏳ Exporting...";
+            dxfBtn.style.backgroundColor = "#757575";
+            dxfBtn.style.cursor = "wait";
+
+            console.log("[DXF Export] Exporting floor plan:", userRoomID);
+
+            // Call the DXF export endpoint
+            $.get("/index/Export_DXF/", {
+                'userRoomID': userRoomID
+            }, function (data) {
+                // Reset button state
+                dxfBtn.innerHTML = originalText;
+                dxfBtn.style.backgroundColor = "#2196F3";
+                dxfBtn.style.cursor = "pointer";
+
+                if (data.success) {
+                    console.log("[DXF Export] Success!", data);
+                    var message = "✅ DXF Export Complete!\n\n" +
+                                "File: " + data.filename + "\n" +
+                                "Location: C:\\Users\\hmbashir\\source\\DXF Floor Plans\\\n" +
+                                "Size: " + data.size_kb + " KB\n" +
+                                "Rooms: " + data.room_count + "\n" +
+                                "Scale: " + data.scale + " (1 pixel = " + data.scale + " units)";
+
+                    alert(message);
+                } else {
+                    console.error("[DXF Export] Failed:", data.error);
+                    var errorMsg = "❌ DXF Export failed:\n" + data.error;
+                    if (data.suggestion) {
+                        errorMsg += "\n\nSuggestion: " + data.suggestion;
+                    }
+                    alert(errorMsg);
+                }
+            }).fail(function(xhr, status, error) {
+                // Reset button state
+                dxfBtn.innerHTML = originalText;
+                dxfBtn.style.backgroundColor = "#2196F3";
+                dxfBtn.style.cursor = "pointer";
+
+                console.error("[DXF Export] Request failed:", xhr.responseText);
+
+                // Try to parse error response
+                var errorMsg = "❌ DXF Export request failed:\n";
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    errorMsg += response.error || error;
+                    if (response.suggestion) {
+                        errorMsg += "\n\nSuggestion: " + response.suggestion;
+                    }
+                } catch (e) {
+                    errorMsg += error;
+                }
+
+                alert(errorMsg);
             });
         };
 

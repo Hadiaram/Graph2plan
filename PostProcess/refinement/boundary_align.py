@@ -91,18 +91,18 @@ def find_closest_segments(box: Box, h_segments: List[BoundarySegment],
         seg_x = seg.x1
 
         # Distance to left edge
-        h_dist_left = box.x1 - seg_x
-        if h_dist_left > 0:  # Segment is to the left of box
-            dist_left = np.sqrt(h_dist_left**2 + v_dist**2)
-            if dist_left < best_left.distance:
-                best_left = EdgeAlignment('left', dist_left, seg_x, seg)
+        # Calculate absolute distance regardless of which side the wall is on
+        h_dist_left = abs(box.x1 - seg_x)
+        dist_left = np.sqrt(h_dist_left**2 + v_dist**2)
+        if dist_left < best_left.distance:
+            best_left = EdgeAlignment('left', dist_left, seg_x, seg)
 
         # Distance to right edge
-        h_dist_right = seg_x - box.x2
-        if h_dist_right > 0:  # Segment is to the right of box
-            dist_right = np.sqrt(h_dist_right**2 + v_dist**2)
-            if dist_right < best_right.distance:
-                best_right = EdgeAlignment('right', dist_right, seg_x, seg)
+        # Calculate absolute distance regardless of which side the wall is on
+        h_dist_right = abs(seg_x - box.x2)
+        dist_right = np.sqrt(h_dist_right**2 + v_dist**2)
+        if dist_right < best_right.distance:
+            best_right = EdgeAlignment('right', dist_right, seg_x, seg)
 
     alignments['left'] = best_left
     alignments['right'] = best_right
@@ -140,18 +140,18 @@ def find_closest_segments(box: Box, h_segments: List[BoundarySegment],
         seg_y = seg.y1
 
         # Distance to top edge
-        v_dist_top = box.y1 - seg_y
-        if v_dist_top > 0:  # Segment is above box
-            dist_top = np.sqrt(v_dist_top**2 + h_dist**2)
-            if dist_top < best_top.distance:
-                best_top = EdgeAlignment('top', dist_top, seg_y, seg)
+        # Calculate absolute distance regardless of which side the wall is on
+        v_dist_top = abs(box.y1 - seg_y)
+        dist_top = np.sqrt(v_dist_top**2 + h_dist**2)
+        if dist_top < best_top.distance:
+            best_top = EdgeAlignment('top', dist_top, seg_y, seg)
 
         # Distance to bottom edge
-        v_dist_bottom = seg_y - box.y2
-        if v_dist_bottom > 0:  # Segment is below box
-            dist_bottom = np.sqrt(v_dist_bottom**2 + h_dist**2)
-            if dist_bottom < best_bottom.distance:
-                best_bottom = EdgeAlignment('bottom', dist_bottom, seg_y, seg)
+        # Calculate absolute distance regardless of which side the wall is on
+        v_dist_bottom = abs(seg_y - box.y2)
+        dist_bottom = np.sqrt(v_dist_bottom**2 + h_dist**2)
+        if dist_bottom < best_bottom.distance:
+            best_bottom = EdgeAlignment('bottom', dist_bottom, seg_y, seg)
 
     alignments['top'] = best_top
     alignments['bottom'] = best_bottom
@@ -192,10 +192,14 @@ def align_box_with_boundary(box: Box, boundary: np.ndarray,
     if verbose:
         print("\n  Closest segments:")
         for edge_name, alignment in alignments.items():
-            print(f"    {edge_name}: distance={alignment.distance:.2f}, snap_to={alignment.snap_value:.2f}")
+            within = "✓" if alignment.distance <= threshold else "✗"
+            print(f"    {within} {edge_name}: distance={alignment.distance:.2f}, snap_to={alignment.snap_value:.2f}")
 
     # Create new box with snapped edges
     aligned_box = Box(box.x1, box.y1, box.x2, box.y2)
+    original_width = box.x2 - box.x1
+    original_height = box.y2 - box.y1
+
     updated_edges = {
         'left': False,
         'top': False,
@@ -203,24 +207,70 @@ def align_box_with_boundary(box: Box, boundary: np.ndarray,
         'bottom': False
     }
 
-    # Snap each edge if within threshold
-    for edge_name, alignment in alignments.items():
-        if alignment.distance <= threshold:
-            if edge_name == 'left':
-                aligned_box.x1 = alignment.snap_value
-                updated_edges['left'] = True
-            elif edge_name == 'top':
-                aligned_box.y1 = alignment.snap_value
-                updated_edges['top'] = True
-            elif edge_name == 'right':
-                aligned_box.x2 = alignment.snap_value
-                updated_edges['right'] = True
-            elif edge_name == 'bottom':
-                aligned_box.y2 = alignment.snap_value
-                updated_edges['bottom'] = True
+    # NEW LOGIC: Find the SINGLE closest edge overall, then shift entire box
+    # This prevents extension/conflicts by only snapping one edge at a time
 
+    # Find which edge is closest to any wall
+    closest_edge = None
+    closest_distance = float('inf')  # Start with infinity to find true minimum
+    closest_alignment = None
+
+    for edge_name, alignment in alignments.items():
+        if alignment.distance < closest_distance:
+            closest_distance = alignment.distance
+            closest_edge = edge_name
+            closest_alignment = alignment
+
+    if verbose and closest_edge:
+        print(f"\n  Overall closest edge: {closest_edge} = {closest_distance:.2f}px")
+
+    # Only snap if the closest edge is within threshold
+    if closest_edge is not None and closest_distance <= threshold:
+        if closest_edge == 'left':
+            # Calculate how much to move
+            delta = aligned_box.x1 - closest_alignment.snap_value
+            # Move both edges by the same amount in the same direction
+            aligned_box.x1 = closest_alignment.snap_value
+            aligned_box.x2 -= delta
+            updated_edges['left'] = True
             if verbose:
-                print(f"  ✓ Snapped {edge_name} edge (dist={alignment.distance:.2f})")
+                print(f"  ✓ Snapped LEFT edge: shifted entire box LEFT by {delta:.2f}px")
+
+        elif closest_edge == 'right':
+            # Calculate how much to move
+            delta = closest_alignment.snap_value - aligned_box.x2
+            # Move both edges by the same amount in the same direction
+            aligned_box.x2 = closest_alignment.snap_value
+            aligned_box.x1 += delta
+            updated_edges['right'] = True
+            if verbose:
+                print(f"  ✓ Snapped RIGHT edge: shifted entire box RIGHT by {delta:.2f}px")
+
+        elif closest_edge == 'top':
+            # Calculate how much to move
+            delta = aligned_box.y1 - closest_alignment.snap_value
+            # Move both edges by the same amount in the same direction
+            aligned_box.y1 = closest_alignment.snap_value
+            aligned_box.y2 -= delta
+            updated_edges['top'] = True
+            if verbose:
+                print(f"  ✓ Snapped TOP edge: shifted entire box UP by {delta:.2f}px")
+
+        elif closest_edge == 'bottom':
+            # Calculate how much to move
+            delta = closest_alignment.snap_value - aligned_box.y2
+            # Move both edges by the same amount in the same direction
+            aligned_box.y2 = closest_alignment.snap_value
+            aligned_box.y1 += delta
+            updated_edges['bottom'] = True
+            if verbose:
+                print(f"  ✓ Snapped BOTTOM edge: shifted entire box DOWN by {delta:.2f}px")
+    else:
+        if verbose:
+            if closest_edge is not None:
+                print(f"  ⊗ No edges within threshold (closest: {closest_edge}={closest_distance:.2f}px > {threshold}px)")
+            else:
+                print(f"  ⊗ No edges within threshold")
 
     # Ensure box is valid (x2 > x1, y2 > y1)
     if aligned_box.x2 <= aligned_box.x1:
@@ -234,8 +284,13 @@ def align_box_with_boundary(box: Box, boundary: np.ndarray,
             print(f"  ⚠ Fixed invalid height")
 
     if verbose:
+        final_width = aligned_box.x2 - aligned_box.x1
+        final_height = aligned_box.y2 - aligned_box.y1
         print(f"\n  Result: {aligned_box}")
         print(f"  Updated edges: {[k for k, v in updated_edges.items() if v]}")
+        print(f"  Size check: Original({original_width:.2f} × {original_height:.2f}) → Final({final_width:.2f} × {final_height:.2f})")
+        if abs(final_width - original_width) > 0.01 or abs(final_height - original_height) > 0.01:
+            print(f"  ⚠️  WARNING: Box size changed! This should not happen.")
 
     return aligned_box, updated_edges
 
@@ -271,8 +326,28 @@ def align_all_boxes_with_boundary(boxes: np.ndarray, boundary: np.ndarray,
         box = Box.from_array(boxes[i])
 
         if verbose:
-            room_type = room_types[i] if room_types is not None else i
-            print(f"\n--- Box {i} (type={room_type}) ---")
+            if room_types is not None:
+                # Map room type to name for better debugging
+                room_type_id = room_types[i]
+                room_type_names = {
+                    0: "LivingRoom",
+                    1: "MasterRoom",
+                    2: "Kitchen",
+                    3: "Bathroom",
+                    4: "DiningRoom",
+                    5: "ChildRoom",
+                    6: "StudyRoom",
+                    7: "SecondRoom",
+                    8: "GuestRoom",
+                    9: "Balcony",
+                    10: "Entrance",
+                    11: "Storage",
+                    12: "Wall"
+                }
+                room_name = room_type_names.get(room_type_id, f"Unknown({room_type_id})")
+                print(f"\n--- Box {i}: {room_name} (type={room_type_id}) ---")
+            else:
+                print(f"\n--- Box {i} ---")
 
         aligned_box, updated_edges = align_box_with_boundary(
             box, boundary, threshold, verbose=verbose
@@ -285,6 +360,26 @@ def align_all_boxes_with_boundary(boxes: np.ndarray, boundary: np.ndarray,
         print(f"\n{'='*60}")
         n_updated = sum(1 for edges in all_updated_edges if any(edges.values()))
         print(f"✓ Aligned {n_updated}/{n_boxes} boxes")
+
+        # Show which boxes didn't snap
+        not_snapped = []
+        for i, edges in enumerate(all_updated_edges):
+            if not any(edges.values()):
+                if room_types is not None:
+                    room_type_id = room_types[i]
+                    room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+                                     4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+                                     8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage", 12: "Wall"}
+                    room_name = room_type_names.get(room_type_id, f"Unknown({room_type_id})")
+                    not_snapped.append(f"Box {i} ({room_name})")
+                else:
+                    not_snapped.append(f"Box {i}")
+
+        if not_snapped:
+            print(f"⚠️  Boxes NOT snapped (all edges > {threshold}px from walls):")
+            for box_desc in not_snapped:
+                print(f"   - {box_desc}")
+
         print(f"{'='*60}\n")
 
     return aligned_boxes, all_updated_edges

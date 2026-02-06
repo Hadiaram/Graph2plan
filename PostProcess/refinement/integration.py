@@ -6,7 +6,7 @@ This module provides a drop-in replacement for MATLAB's align_fp function.
 
 import numpy as np
 from typing import Tuple, List, Union
-from .boundary_align import align_all_boxes_with_boundary
+from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, fill_small_boundary_gaps
 from .expand_living_room import expand_living_room_to_boundary
 
 
@@ -61,93 +61,134 @@ def align_fp_python(boundary: np.ndarray,
 
     print(f"\n[Python Refinement] Processing floor plan {fp_id}")
     print(f"  Boxes: {len(boxes)}, Boundary vertices: {len(boundary)}, Threshold: {threshold}px")
-    print(f"  Refinement Pass: {refinement_pass}/2")
+    print(f"  Refinement Pass: {refinement_pass}/3")
 
     # ============================================================
     # STEP 1: BOUNDARY ALIGNMENT ✅
     # ============================================================
-    
+
     # Determine which axis to exclude based on the pass
     # Pass 1: No exclusions, snap to closest edge (records which axis was used)
     # Pass 2: Exclude the axis that was snapped in Pass 1 to force orthogonal snapping
-    
+    # Pass 3: Room-to-room snapping (skip wall snapping)
+
     exclude_axis = None
     # Determine per-box axis exclusion for pass 2
     per_box_exclude = None
-    if refinement_pass == 2:
+    if refinement_pass == 3:
+        # Pass 3: Skip wall snapping entirely, just pass boxes through
+        print(f"  Pass 3: Skipping wall snapping (will do room-to-room snapping instead)")
+        aligned_boxes = boxes.copy()
+        updated_edges = [{'left': False, 'top': False, 'right': False, 'bottom': False} for _ in range(len(boxes))]
+    elif refinement_pass == 2:
         # On second pass, each box should snap the orthogonal axis from what it did in pass 1
-        # Use ORIGINAL boxes to determine what each box did in pass 1
-        boxes_for_prescan = original_boxes if original_boxes is not None else boxes
-        
-        # Quick pre-scan: Find out which axis each box used in pass 1
-        test_aligned, test_updated = align_all_boxes_with_boundary(
-            boxes_for_prescan, boundary, threshold=threshold, room_types=room_types, 
-            verbose=False, exclude_axis=None, refinement_pass=1
-        )
-        
-        # For each box, determine which axis to exclude in pass 2
+        # FIXED: Check which walls the CURRENT boxes (Pass 1 refined) are attached to
+        from .boundary_align import find_closest_segments, extract_boundary_segments, Box
+
+        h_segments, v_segments = extract_boundary_segments(boundary)
+
+        # For each box, determine which axis to exclude based on current wall attachments
         per_box_exclude = []
-        for i, edges in enumerate(test_updated):
-            horizontal_snapped = edges.get('left', False) or edges.get('right', False)
-            vertical_snapped = edges.get('top', False) or edges.get('bottom', False)
-            
-            # If this box snapped horizontally in pass 1, exclude horizontal in pass 2 (force vertical)
-            # If this box snapped vertically in pass 1, exclude vertical in pass 2 (force horizontal)
-            if horizontal_snapped:
+        for i in range(len(boxes)):
+            box = Box.from_array(boxes[i])
+            alignments = find_closest_segments(box, h_segments, v_segments)
+
+            # Check which walls this box is currently attached to (from Pass 1)
+            attached_left = alignments['left'].distance < 0.1
+            attached_right = alignments['right'].distance < 0.1
+            attached_top = alignments['top'].distance < 0.1
+            attached_bottom = alignments['bottom'].distance < 0.1
+
+            horizontal_attached = attached_left or attached_right
+            vertical_attached = attached_top or attached_bottom
+
+            # If attached horizontally, exclude horizontal (force vertical snap in Pass 2)
+            # If attached vertically, exclude vertical (force horizontal snap in Pass 2)
+            if horizontal_attached and vertical_attached:
+                # Attached to both axes - could exclude both, or pick one
+                # Let's exclude horizontal to try vertical movement
                 per_box_exclude.append('horizontal')
-            elif vertical_snapped:
+            elif horizontal_attached:
+                per_box_exclude.append('horizontal')
+            elif vertical_attached:
                 per_box_exclude.append('vertical')
             else:
                 # Box didn't snap in pass 1, allow both axes in pass 2
                 per_box_exclude.append(None)
-        
-        print(f"  Pass 2: Using per-box axis exclusion based on Pass 1 behavior")
-        
-    print(f"  Step 1: Aligning boxes with boundary...")
 
-    aligned_boxes, updated_edges = align_all_boxes_with_boundary(
-        boxes,
-        boundary,
-        threshold=threshold,
-        room_types=room_types,
-        verbose=True,  # Enable verbose logging to debug
-        exclude_axis=per_box_exclude if refinement_pass == 2 else None,
-        refinement_pass=refinement_pass
-    )
+        print(f"  Pass 2: Using per-box axis exclusion based on current wall attachments")
 
-    n_updated = sum(1 for edges_dict in updated_edges if any(edges_dict.values()))
-    print(f"    ✓ Aligned {n_updated}/{len(boxes)} boxes")
+    if refinement_pass != 3:
+        print(f"  Step 1: Aligning boxes with boundary...")
 
-    # ============================================================
-    # STEP 2: NEIGHBOR ALIGNMENT (TODO)
-    # ============================================================
-    print("  Step 2: Neighbor alignment (TODO - using boundary-aligned boxes)")
-    # TODO: Implement neighbor alignment
-    # For now, just use boundary-aligned boxes
-    neighbor_aligned_boxes = aligned_boxes.copy()
+        aligned_boxes, updated_edges = align_all_boxes_with_boundary(
+            boxes,
+            boundary,
+            threshold=threshold,
+            room_types=room_types,
+            verbose=True,  # Enable verbose logging to debug
+            exclude_axis=per_box_exclude if refinement_pass == 2 else None,
+            refinement_pass=refinement_pass
+        )
+
+        n_updated = sum(1 for edges_dict in updated_edges if any(edges_dict.values()))
+        print(f"    ✓ Aligned {n_updated}/{len(boxes)} boxes")
 
     # ============================================================
-    # STEP 3: GAP FILLING & REGULARIZATION (TODO)
+    # STEP 2: ROOM-TO-ROOM SNAPPING (Pass 3 only)
     # ============================================================
-    print("  Step 3: Gap filling (TODO - using current boxes)")
-    # TODO: Implement gap filling
-    # For now, just use neighbor-aligned boxes
-    final_boxes = neighbor_aligned_boxes.copy()
+    if refinement_pass == 3:
+        print("  Step 2: Room-to-room snapping...")
+        neighbor_aligned_boxes = snap_rooms_to_neighbors(
+            aligned_boxes,
+            room_types,
+            edges,
+            boundary,
+            threshold=threshold,
+            verbose=True
+        )
+    else:
+        print("  Step 2: Room-to-room snapping (skipped - only runs in Pass 3)")
+        neighbor_aligned_boxes = aligned_boxes.copy()
+
+    # ============================================================
+    # STEP 3: FILL SMALL BOUNDARY GAPS (Pass 3 only)
+    # ============================================================
+    if refinement_pass == 3:
+        print("  Step 3: Filling small boundary gaps...")
+        gap_filled_boxes = fill_small_boundary_gaps(
+            neighbor_aligned_boxes,
+            room_types,
+            boundary,
+            gap_threshold=20.0,  # Fill gaps up to 20 pixels
+            verbose=True
+        )
+    else:
+        print("  Step 3: Filling small boundary gaps (skipped - only runs in Pass 3)")
+        gap_filled_boxes = neighbor_aligned_boxes.copy()
+
+    # ============================================================
+    # STEP 4: FINAL PROCESSING (TODO)
+    # ============================================================
+    print("  Step 4: Final processing (TODO - using current boxes)")
+    # TODO: Any final adjustments
+    # For now, just use gap-filled boxes
+    final_boxes = gap_filled_boxes.copy()
 
     # ============================================================
     # STEP 3.5: LIVING ROOM EXPANSION (OPTIONAL)
     # ============================================================
-    # Only expand living room after Pass 2 is complete (after all snapping is done)
-    if expand_living_room and refinement_pass == 2:
-        print("  Step 3.5: Expanding living room to fill boundary (Pass 2 complete)...")
+    # Only expand living room after Pass 3 is complete (after all snapping is done)
+    if expand_living_room and refinement_pass == 3:
+        print("  Step 3.5: Expanding living room to fill boundary (Pass 3 complete)...")
         final_boxes = expand_living_room_to_boundary(
             final_boxes,
             room_types,
             boundary,
             verbose=True
         )
-    elif expand_living_room and refinement_pass == 1:
-        print("  Step 3.5: Skipping living room expansion (waiting for Pass 2)...")
+    elif expand_living_room:
+        print(f"  Step 3.5: Skipping living room expansion (waiting for Pass 3)...")
 
     # ============================================================
     # STEP 4: POLYGON GENERATION (TODO)

@@ -743,6 +743,409 @@ def align_all_boxes_with_boundary(boxes: np.ndarray, boundary: np.ndarray,
     return aligned_boxes, all_updated_edges
 
 
+def snap_rooms_to_neighbors(boxes: np.ndarray,
+                            room_types: np.ndarray,
+                            edges: np.ndarray,
+                            boundary: np.ndarray,
+                            threshold: float = 8.0,
+                            verbose: bool = False) -> np.ndarray:
+    """
+    Pass 3: Snap rooms to their nearest neighboring rooms.
+
+    This function moves rooms to align with adjacent room boundaries, but only if:
+    1. The room is NOT a living room (type 0)
+    2. The room is connected to fewer than 2 walls (if connected to 2+ walls, it's locked)
+    3. The movement won't detach the room from walls it's currently attached to
+
+    Args:
+        boxes: Nx4 array of boxes [[x1, y1, x2, y2], ...]
+        room_types: Room type indices (0=Living, 1=Bedroom, etc.)
+        edges: Adjacency graph, shape (K, 2) or (K, 3)
+               Format: [[room_i, room_j], ...] or [[room_i, room_j, spatial_type], ...]
+        boundary: Boundary polygon for wall attachment checking
+        threshold: Snapping threshold in pixels
+        verbose: Print debug information
+
+    Returns:
+        snapped_boxes: Nx4 array of boxes with room-to-room snapping applied
+    """
+    n_boxes = len(boxes)
+    snapped_boxes = boxes.copy()
+
+    # Extract boundary segments for wall attachment checking
+    h_segments, v_segments = extract_boundary_segments(boundary)
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"ROOM-TO-ROOM SNAPPING - {n_boxes} boxes")
+        print(f"{'='*60}")
+
+    # Build adjacency list from edges
+    adjacency = {i: set() for i in range(n_boxes)}
+    for edge in edges:
+        room_i, room_j = int(edge[0]), int(edge[1])
+        if room_i < n_boxes and room_j < n_boxes:
+            adjacency[room_i].add(room_j)
+            adjacency[room_j].add(room_i)
+
+    # Process each room
+    n_snapped = 0
+    for i in range(n_boxes):
+        box = Box.from_array(snapped_boxes[i])
+        room_type = room_types[i]
+
+        # Skip living room (type 0)
+        if room_type == 0:
+            if verbose:
+                print(f"\n--- Box {i}: LivingRoom ---")
+                print(f"  ⊘ Skipping (living room excluded from room-to-room snapping)")
+            continue
+
+        if verbose:
+            room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+                             4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+                             8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage", 12: "Wall"}
+            room_name = room_type_names.get(room_type, f"Unknown({room_type})")
+            print(f"\n--- Box {i}: {room_name} ---")
+
+        # Check how many walls this room is attached to
+        alignments = find_closest_segments(box, h_segments, v_segments)
+        n_walls_attached = sum(1 for alignment in alignments.values() if alignment.distance < 0.1)
+
+        if n_walls_attached >= 2:
+            # Check if there are any non-touching graph neighbors (excluding living room)
+            # If there's a gap to a neighbor, allow movement to close the gap
+            has_gap_to_neighbor = False
+            gap_threshold = 5.0  # Consider rooms "touching" if closer than this
+
+            for neighbor_idx in neighbors:
+                # Skip living room
+                if room_types[neighbor_idx] == 0:
+                    continue
+
+                neighbor_box = Box.from_array(snapped_boxes[neighbor_idx])
+
+                # Calculate minimum distance between the two boxes
+                # If boxes overlap or touch, distance is 0 or negative
+                # If there's a gap, distance is positive
+
+                # Check horizontal gap
+                if box.x2 < neighbor_box.x1:  # Box is to the left of neighbor
+                    h_gap = neighbor_box.x1 - box.x2
+                elif neighbor_box.x2 < box.x1:  # Box is to the right of neighbor
+                    h_gap = box.x1 - neighbor_box.x2
+                else:  # Horizontal overlap
+                    h_gap = 0
+
+                # Check vertical gap
+                if box.y2 < neighbor_box.y1:  # Box is above neighbor
+                    v_gap = neighbor_box.y1 - box.y2
+                elif neighbor_box.y2 < box.y1:  # Box is below neighbor
+                    v_gap = box.y1 - neighbor_box.y2
+                else:  # Vertical overlap
+                    v_gap = 0
+
+                # Minimum distance is the gap (0 if touching/overlapping)
+                min_dist = max(h_gap, v_gap) if (h_gap > 0 and v_gap > 0) else max(h_gap, v_gap, 0)
+
+                # If there's a significant gap, allow movement
+                if min_dist > gap_threshold:
+                    has_gap_to_neighbor = True
+                    if verbose:
+                        print(f"    Gap to neighbor {neighbor_idx}: {min_dist:.2f}px")
+                    break
+
+            if not has_gap_to_neighbor:
+                if verbose:
+                    print(f"  ⊗ Skipping (attached to {n_walls_attached} walls, all non-living neighbors touching)")
+                continue
+            else:
+                if verbose:
+                    print(f"  ✓ Attached to {n_walls_attached} walls but has gap to neighbor, allowing movement")
+
+        # Find neighbor rooms
+        neighbors = adjacency.get(i, set())
+        if not neighbors:
+            if verbose:
+                print(f"  ⊗ Skipping (no neighbors in adjacency graph)")
+            continue
+
+        if verbose:
+            print(f"  Neighbors: {list(neighbors)}, Attached to {n_walls_attached} wall(s)")
+
+        # Find closest neighbor edge
+        best_edge = None
+        best_distance = float('inf')
+        best_snap_delta = None
+        best_axis = None
+
+        for neighbor_idx in neighbors:
+            neighbor_box = Box.from_array(snapped_boxes[neighbor_idx])
+
+            # Calculate distances to each edge of the neighbor
+            # Left edge of neighbor (vertical line at neighbor.x1)
+            if box.y2 > neighbor_box.y1 and box.y1 < neighbor_box.y2:  # Vertical overlap
+                dist_to_left = abs(box.x2 - neighbor_box.x1)  # Our right edge to their left edge
+                dist_from_left = abs(box.x1 - neighbor_box.x1)  # Our left edge to their left edge
+
+                if dist_to_left < best_distance and dist_to_left <= threshold:
+                    best_distance = dist_to_left
+                    best_edge = 'right_to_left'
+                    best_snap_delta = neighbor_box.x1 - box.x2
+                    best_axis = 'horizontal'
+
+                if dist_from_left < best_distance and dist_from_left <= threshold:
+                    best_distance = dist_from_left
+                    best_edge = 'left_to_left'
+                    best_snap_delta = neighbor_box.x1 - box.x1
+                    best_axis = 'horizontal'
+
+            # Right edge of neighbor (vertical line at neighbor.x2)
+            if box.y2 > neighbor_box.y1 and box.y1 < neighbor_box.y2:  # Vertical overlap
+                dist_to_right = abs(box.x1 - neighbor_box.x2)  # Our left edge to their right edge
+                dist_from_right = abs(box.x2 - neighbor_box.x2)  # Our right edge to their right edge
+
+                if dist_to_right < best_distance and dist_to_right <= threshold:
+                    best_distance = dist_to_right
+                    best_edge = 'left_to_right'
+                    best_snap_delta = neighbor_box.x2 - box.x1
+                    best_axis = 'horizontal'
+
+                if dist_from_right < best_distance and dist_from_right <= threshold:
+                    best_distance = dist_from_right
+                    best_edge = 'right_to_right'
+                    best_snap_delta = neighbor_box.x2 - box.x2
+                    best_axis = 'horizontal'
+
+            # Top edge of neighbor (horizontal line at neighbor.y1)
+            if box.x2 > neighbor_box.x1 and box.x1 < neighbor_box.x2:  # Horizontal overlap
+                dist_to_top = abs(box.y2 - neighbor_box.y1)  # Our bottom edge to their top edge
+                dist_from_top = abs(box.y1 - neighbor_box.y1)  # Our top edge to their top edge
+
+                if dist_to_top < best_distance and dist_to_top <= threshold:
+                    best_distance = dist_to_top
+                    best_edge = 'bottom_to_top'
+                    best_snap_delta = neighbor_box.y1 - box.y2
+                    best_axis = 'vertical'
+
+                if dist_from_top < best_distance and dist_from_top <= threshold:
+                    best_distance = dist_from_top
+                    best_edge = 'top_to_top'
+                    best_snap_delta = neighbor_box.y1 - box.y1
+                    best_axis = 'vertical'
+
+            # Bottom edge of neighbor (horizontal line at neighbor.y2)
+            if box.x2 > neighbor_box.x1 and box.x1 < neighbor_box.x2:  # Horizontal overlap
+                dist_to_bottom = abs(box.y1 - neighbor_box.y2)  # Our top edge to their bottom edge
+                dist_from_bottom = abs(box.y2 - neighbor_box.y2)  # Our bottom edge to their bottom edge
+
+                if dist_to_bottom < best_distance and dist_to_bottom <= threshold:
+                    best_distance = dist_to_bottom
+                    best_edge = 'top_to_bottom'
+                    best_snap_delta = neighbor_box.y2 - box.y1
+                    best_axis = 'vertical'
+
+                if dist_from_bottom < best_distance and dist_from_bottom <= threshold:
+                    best_distance = dist_from_bottom
+                    best_edge = 'bottom_to_bottom'
+                    best_snap_delta = neighbor_box.y2 - box.y2
+                    best_axis = 'vertical'
+
+        if best_edge is None:
+            if verbose:
+                print(f"  ⊗ No neighbor edges within threshold ({threshold}px)")
+            continue
+
+        if verbose:
+            print(f"  Closest neighbor edge: {best_edge}, distance={best_distance:.2f}px, delta={best_snap_delta:.2f}px")
+
+        # Calculate new box position after snapping
+        if best_axis == 'horizontal':
+            new_box = Box(box.x1 + best_snap_delta, box.y1,
+                         box.x2 + best_snap_delta, box.y2)
+        else:  # vertical
+            new_box = Box(box.x1, box.y1 + best_snap_delta,
+                         box.x2, box.y2 + best_snap_delta)
+
+        # Check if this would detach from walls
+        # We need to check which edge corresponds to the snap direction
+        if best_axis == 'horizontal':
+            # Horizontal movement - check if we're detaching from left/right walls
+            if best_snap_delta > 0:
+                edge_to_check = 'right'
+            else:
+                edge_to_check = 'left'
+        else:
+            # Vertical movement - check if we're detaching from top/bottom walls
+            if best_snap_delta > 0:
+                edge_to_check = 'bottom'
+            else:
+                edge_to_check = 'top'
+
+        # Use the wall snap value from current alignments
+        snap_value = new_box.x1 if edge_to_check == 'left' else \
+                     new_box.x2 if edge_to_check == 'right' else \
+                     new_box.y1 if edge_to_check == 'top' else new_box.y2
+
+        would_detach, detached_edges = would_detach_from_walls(
+            box, edge_to_check, snap_value, alignments, tolerance=0.1
+        )
+
+        if would_detach:
+            if verbose:
+                print(f"  ⊗ Skipping (would detach from walls: {', '.join(detached_edges)})")
+            continue
+
+        # Apply the snap
+        snapped_boxes[i] = new_box.to_array()
+        n_snapped += 1
+
+        if verbose:
+            print(f"  ✓ Snapped to neighbor (moved {abs(best_snap_delta):.2f}px along {best_axis} axis)")
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"✓ Snapped {n_snapped}/{n_boxes} boxes to neighbors")
+        print(f"{'='*60}\n")
+
+    return snapped_boxes
+
+
+def fill_small_boundary_gaps(boxes: np.ndarray,
+                             room_types: np.ndarray,
+                             boundary: np.ndarray,
+                             gap_threshold: float = 20.0,
+                             verbose: bool = False) -> np.ndarray:
+    """
+    Expand rooms to fill small gaps at the boundary corners.
+
+    This function expands room edges that are close to the boundary (within gap_threshold)
+    to fill small empty corners. Only runs on non-living-room boxes.
+
+    Args:
+        boxes: Nx4 array of boxes [[x1, y1, x2, y2], ...]
+        room_types: Room type indices (0=Living, 1=Bedroom, etc.)
+        boundary: Boundary polygon
+        gap_threshold: Maximum gap distance to fill (pixels)
+        verbose: Print debug information
+
+    Returns:
+        expanded_boxes: Nx4 array of boxes with gaps filled
+    """
+    n_boxes = len(boxes)
+    expanded_boxes = boxes.copy()
+
+    # Extract boundary segments
+    h_segments, v_segments = extract_boundary_segments(boundary)
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"FILLING SMALL BOUNDARY GAPS - {n_boxes} boxes")
+        print(f"  Gap threshold: {gap_threshold}px")
+        print(f"{'='*60}")
+
+    n_expanded = 0
+    for i in range(n_boxes):
+        box = Box.from_array(expanded_boxes[i])
+        room_type = room_types[i]
+
+        # Skip living room (it will be expanded separately)
+        if room_type == 0:
+            if verbose:
+                print(f"\n--- Box {i}: LivingRoom ---")
+                print(f"  ⊘ Skipping (living room)")
+            continue
+
+        if verbose:
+            room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+                             4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+                             8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage", 12: "Wall"}
+            room_name = room_type_names.get(room_type, f"Unknown({room_type})")
+            print(f"\n--- Box {i}: {room_name} ---")
+
+        # Iteratively expand multiple edges to fill corner pockets
+        # Keep trying to expand edges until no more expansions are possible
+        max_iterations = 4  # Maximum number of edges that can be expanded (one per direction)
+        edges_expanded = []
+
+        for iteration in range(max_iterations):
+            # Recalculate alignments with current box position
+            box = Box.from_array(expanded_boxes[i])
+            alignments = find_closest_segments(box, h_segments, v_segments)
+
+            # Find the closest edge that can be expanded
+            best_edge = None
+            best_alignment = None
+            best_distance = float('inf')
+
+            for edge_name, alignment in alignments.items():
+                # Skip edges already expanded
+                if edge_name in edges_expanded:
+                    continue
+
+                # Only consider edges close to boundary but not already attached
+                if alignment.distance <= gap_threshold and alignment.distance > 0.1:
+                    if alignment.distance < best_distance:
+                        best_distance = alignment.distance
+                        best_edge = edge_name
+                        best_alignment = alignment
+
+            # If no more edges can be expanded, stop
+            if best_edge is None:
+                break
+
+            # Create expanded box
+            if best_edge == 'left':
+                new_box = Box(best_alignment.snap_value, box.y1, box.x2, box.y2)
+            elif best_edge == 'right':
+                new_box = Box(box.x1, box.y1, best_alignment.snap_value, box.y2)
+            elif best_edge == 'top':
+                new_box = Box(box.x1, best_alignment.snap_value, box.x2, box.y2)
+            elif best_edge == 'bottom':
+                new_box = Box(box.x1, box.y1, box.x2, best_alignment.snap_value)
+            else:
+                break
+
+            # Check for overlap with other rooms
+            would_overlap = False
+            for j in range(n_boxes):
+                if i == j:
+                    continue
+                other_box = Box.from_array(expanded_boxes[j])
+
+                # Check if boxes overlap
+                if (new_box.x1 < other_box.x2 and new_box.x2 > other_box.x1 and
+                    new_box.y1 < other_box.y2 and new_box.y2 > other_box.y1):
+                    would_overlap = True
+                    break
+
+            if not would_overlap:
+                # Apply the expansion
+                expanded_boxes[i] = new_box.to_array()
+                edges_expanded.append(best_edge)
+                if verbose:
+                    print(f"  ✓ Expanded {best_edge} edge by {best_distance:.2f}px to fill gap")
+            else:
+                # Can't expand this edge, mark it as tried
+                edges_expanded.append(best_edge)
+                if verbose:
+                    print(f"  ⊗ Cannot expand {best_edge} (would overlap with other room)")
+
+        # Update counter
+        if len(edges_expanded) > 0:
+            n_expanded += 1
+
+        if len(edges_expanded) == 0 and verbose:
+            print(f"  ⊗ No small gaps to fill (all edges either attached or too far)")
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"✓ Expanded {n_expanded} boxes to fill boundary gaps")
+        print(f"{'='*60}\n")
+
+    return expanded_boxes
+
+
 if __name__ == "__main__":
     print("Testing boundary alignment...")
 

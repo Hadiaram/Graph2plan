@@ -1269,27 +1269,27 @@ def Refine_Floorplan(request):
         # ALWAYS keep original boxes for reference (used in Pass 2 pre-scan)
         original_boxes = fp_data['refineBox']
 
-        # NEW: Track refinement pass (1 or 2)
+        # NEW: Track refinement pass (1, 2, or 3)
         # Store at top level of data dict to avoid structured array issues
         if 'refinement_pass' in data:
             current_pass = int(data['refinement_pass'][0, 0]) if data['refinement_pass'].size > 0 else 1
         else:
             current_pass = 1
 
-        # If we're on pass 3, reset to 1 (cycle back after completing 2 passes)
-        if current_pass > 2:
+        # If we're on pass 4, reset to 1 (cycle back after completing 3 passes)
+        if current_pass > 3:
             current_pass = 1
 
-        # CRITICAL: On Pass 2, use the refined boxes from Pass 1, not the original boxes!
-        if current_pass == 2 and 'newBox' in fp_data.dtype.names and fp_data['newBox'].size > 0:
-            boxes = fp_data['newBox']  # Use Pass 1 refined boxes
-            print(f"  Loading refined boxes from Pass 1 for Pass 2 refinement")
+        # CRITICAL: On Pass 2 or 3, use the refined boxes from previous passes, not the original boxes!
+        if current_pass >= 2 and 'newBox' in fp_data.dtype.names and fp_data['newBox'].size > 0:
+            boxes = fp_data['newBox']  # Use refined boxes from previous pass
+            print(f"  Loading refined boxes from Pass {current_pass-1} for Pass {current_pass} refinement")
         else:
             boxes = original_boxes  # Original boxes (for Pass 1 or if no refined boxes exist)
 
         print(f"\n[Manual Refine] Processing {userRoomID}")
         print(f"  Boxes: {len(boxes)}, Threshold: {threshold}px, Force method: {force_method}")
-        print(f"  Refinement Pass: {current_pass}/2")
+        print(f"  Refinement Pass: {current_pass}/3")
         print(f"  Expand Living Room: {expand_living}")
 
         # Run refinement based on method preference
@@ -1386,12 +1386,12 @@ def Refine_Floorplan(request):
 
         # NEW: Store the NEXT pass number for the next refinement call
         # Store at top level to avoid structured array field issues
-        next_pass = current_pass + 1 if current_pass < 2 else 1
+        next_pass = current_pass + 1 if current_pass < 3 else 1
         data['refinement_pass'] = np.array([[next_pass]])
 
         # Save back to disk
         sio.savemat(mat_path, data)
-        print(f"[Manual Refine] ✓ Saved refined floor plan to disk (next pass will be {next_pass}/2)")
+        print(f"[Manual Refine] ✓ Saved refined floor plan to disk (next pass will be {next_pass}/3)")
 
         # Format data for frontend rendering (same format as AdjustGraph response)
         roomret = []

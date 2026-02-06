@@ -25,6 +25,19 @@ except ImportError:
         UserWarning
     )
 
+# Try to import shapely for polygon clipping
+HAS_SHAPELY = False
+try:
+    from shapely.geometry import Polygon, MultiPolygon
+    from shapely.ops import unary_union
+    HAS_SHAPELY = True
+except ImportError:
+    warnings.warn(
+        "shapely not installed. DXF export will show overlapping rooms. "
+        "Install with: pip install shapely for proper clipping",
+        UserWarning
+    )
+
 
 def _get_field(fp_data, field_name):
     """
@@ -113,43 +126,72 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
                     print(f"[DXF] Drew exterior boundary with {len(exterior_points)} points")
 
         # 2. Draw room boundaries (preferred over boxes for accuracy)
+        # IMPORTANT: Clip rooms to show only visible parts (no overlaps)
         rBoundary = _get_field(fp_data, 'rBoundary')
         if rBoundary is not None and len(rBoundary) > 0:
             room_labels = _get_room_labels(fp_data)
 
-            for i, rb in enumerate(rBoundary):
-                if isinstance(rb, np.ndarray) and len(rb) > 0:
-                    room_points = [(float(x) * scale, float(y) * scale)
-                                  for x, y in rb]
+            # Get rendering order (determines which rooms appear on top)
+            order = _get_field(fp_data, 'order')
+            if order is not None and len(order) > 0:
+                # Order is 1-indexed [[1], [2], ...] - convert to 0-indexed list
+                try:
+                    order_indices = [int(idx[0]) - 1 for idx in order if len(idx) > 0]
+                    print(f"[DXF] Using rendering order: {order_indices}")
+                except:
+                    # Fallback if order format is unexpected
+                    order_indices = list(range(len(rBoundary)))
+                    print(f"[DXF] Warning: Could not parse order, using default sequence")
+            else:
+                # No order specified, use default sequence
+                order_indices = list(range(len(rBoundary)))
+                print(f"[DXF] No rendering order found, using default sequence")
 
-                    # Close the polygon
-                    if room_points[0] != room_points[-1]:
-                        room_points.append(room_points[0])
+            # Clip room polygons to remove overlaps and parts outside boundary
+            boundary_array = _get_field(fp_data, 'boundary')
+            if boundary_array is not None:
+                clipped_rBoundary = _clip_room_polygons(rBoundary, np.array(boundary_array), order)
+            else:
+                clipped_rBoundary = rBoundary
 
-                    # Draw room boundary
-                    msp.add_lwpolyline(
-                        room_points,
-                        dxfattribs={
-                            'layer': 'INTERIOR_WALL',
-                            'const_width': wall_thickness * scale * 0.5  # Thinner than exterior
-                        }
-                    )
+            # Draw clipped rooms in the specified order
+            rooms_drawn = 0
+            for i in order_indices:
+                if i < len(clipped_rBoundary) and clipped_rBoundary[i] is not None:
+                    rb = clipped_rBoundary[i]
+                    if isinstance(rb, np.ndarray) and len(rb) > 0:
+                        room_points = [(float(x) * scale, float(y) * scale)
+                                      for x, y in rb]
 
-                    # Add room label at centroid
-                    if include_labels and i < len(room_labels):
-                        centroid = _calculate_centroid(rb)
-                        msp.add_text(
-                            room_labels[i],
+                        # Close the polygon
+                        if room_points[0] != room_points[-1]:
+                            room_points.append(room_points[0])
+
+                        # Draw room boundary (only visible parts)
+                        msp.add_lwpolyline(
+                            room_points,
                             dxfattribs={
-                                'layer': 'LABELS',
-                                'height': 5.0 * scale,
+                                'layer': 'INTERIOR_WALL',
+                                'const_width': wall_thickness * scale * 0.5  # Thinner than exterior
                             }
-                        ).set_placement(
-                            (centroid[0] * scale, centroid[1] * scale),
-                            align=TextEntityAlignment.MIDDLE_CENTER
                         )
 
-            print(f"[DXF] Drew {len(rBoundary)} room boundaries with labels")
+                        # Add room label at centroid of clipped polygon
+                        if include_labels and i < len(room_labels):
+                            centroid = _calculate_centroid(rb)
+                            msp.add_text(
+                                room_labels[i],
+                                dxfattribs={
+                                    'layer': 'LABELS',
+                                    'height': 5.0 * scale,
+                                }
+                            ).set_placement(
+                                (centroid[0] * scale, centroid[1] * scale),
+                                align=TextEntityAlignment.MIDDLE_CENTER
+                            )
+                        rooms_drawn += 1
+
+            print(f"[DXF] Drew {rooms_drawn}/{len(rBoundary)} room boundaries (clipped, no overlaps)")
 
         # 3. Fallback: Draw room boxes if rBoundary not available
         else:
@@ -158,43 +200,79 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
                 boxes = np.array(newBox)
                 room_labels = _get_room_labels(fp_data)
 
-                for i, box in enumerate(boxes):
+                # Get rendering order
+                order = _get_field(fp_data, 'order')
+                if order is not None and len(order) > 0:
+                    try:
+                        order_indices = [int(idx[0]) - 1 for idx in order if len(idx) > 0]
+                        print(f"[DXF] Using rendering order: {order_indices}")
+                    except:
+                        order_indices = list(range(len(boxes)))
+                        print(f"[DXF] Warning: Could not parse order, using default sequence")
+                else:
+                    order_indices = list(range(len(boxes)))
+                    print(f"[DXF] No rendering order found, using default sequence")
+
+                # Convert boxes to polygons for clipping
+                box_polygons = []
+                for box in boxes:
                     if len(box) >= 4:
                         x1, y1, x2, y2 = box[:4]
+                        box_poly = np.array([
+                            [x1, y1],
+                            [x2, y1],
+                            [x2, y2],
+                            [x1, y2],
+                            [x1, y1]
+                        ])
+                        box_polygons.append(box_poly)
+                    else:
+                        box_polygons.append(None)
 
-                        # Draw room as rectangle
-                        room_points = [
-                            (float(x1) * scale, float(y1) * scale),
-                            (float(x2) * scale, float(y1) * scale),
-                            (float(x2) * scale, float(y2) * scale),
-                            (float(x1) * scale, float(y2) * scale),
-                            (float(x1) * scale, float(y1) * scale)  # Close
-                        ]
+                # Clip boxes
+                boundary_array = _get_field(fp_data, 'boundary')
+                if boundary_array is not None:
+                    clipped_boxes = _clip_room_polygons(box_polygons, np.array(boundary_array), order)
+                else:
+                    clipped_boxes = box_polygons
 
-                        msp.add_lwpolyline(
-                            room_points,
-                            dxfattribs={
-                                'layer': 'ROOMS',
-                                'const_width': wall_thickness * scale * 0.5
-                            }
-                        )
+                # Draw clipped boxes in rendering order
+                rooms_drawn = 0
+                for i in order_indices:
+                    if i < len(clipped_boxes) and clipped_boxes[i] is not None:
+                        clipped_poly = clipped_boxes[i]
+                        if isinstance(clipped_poly, np.ndarray) and len(clipped_poly) > 0:
+                            room_points = [(float(x) * scale, float(y) * scale)
+                                          for x, y in clipped_poly]
 
-                        # Add room label at center
-                        if include_labels and i < len(room_labels):
-                            center_x = (float(x1) + float(x2)) / 2 * scale
-                            center_y = (float(y1) + float(y2)) / 2 * scale
-                            msp.add_text(
-                                room_labels[i],
+                            # Close if needed
+                            if room_points[0] != room_points[-1]:
+                                room_points.append(room_points[0])
+
+                            msp.add_lwpolyline(
+                                room_points,
                                 dxfattribs={
-                                    'layer': 'LABELS',
-                                    'height': 5.0 * scale,
+                                    'layer': 'ROOMS',
+                                    'const_width': wall_thickness * scale * 0.5
                                 }
-                            ).set_placement(
-                                (center_x, center_y),
-                                align=TextEntityAlignment.MIDDLE_CENTER
                             )
 
-                print(f"[DXF] Drew {len(boxes)} room boxes (fallback)")
+                            # Add room label at centroid of clipped polygon
+                            if include_labels and i < len(room_labels):
+                                centroid = _calculate_centroid(clipped_poly)
+                                msp.add_text(
+                                    room_labels[i],
+                                    dxfattribs={
+                                        'layer': 'LABELS',
+                                        'height': 5.0 * scale,
+                                    }
+                                ).set_placement(
+                                    (centroid[0] * scale, centroid[1] * scale),
+                                    align=TextEntityAlignment.MIDDLE_CENTER
+                                )
+                            rooms_drawn += 1
+
+                print(f"[DXF] Drew {rooms_drawn}/{len(boxes)} room boxes (clipped, no overlaps)")
 
         # 4. Draw windows
         windows = _get_field(fp_data, 'windows')
@@ -372,6 +450,86 @@ def _calculate_centroid(polygon):
     y_coords = polygon[:, 1]
 
     return (float(np.mean(x_coords)), float(np.mean(y_coords)))
+
+
+def _clip_room_polygons(rBoundary, boundary, order):
+    """
+    Clip room polygons to show only visible parts.
+
+    For each room:
+    1. Clip to boundary (remove parts outside)
+    2. Subtract rooms that are on top of it (based on order)
+
+    Args:
+        rBoundary: List of room boundary polygons
+        boundary: Exterior boundary polygon
+        order: Rendering order (1-indexed)
+
+    Returns:
+        List of clipped polygons (same length as rBoundary, None for fully hidden rooms)
+    """
+    if not HAS_SHAPELY:
+        print("[DXF] Warning: Shapely not available, cannot clip overlapping rooms")
+        return rBoundary
+
+    try:
+        # Convert boundary to Shapely Polygon
+        boundary_poly = Polygon(boundary[:, :2])
+
+        # Convert order to 0-indexed
+        order_indices = [int(idx[0]) - 1 for idx in order if len(idx) > 0]
+
+        # Convert all rooms to Shapely polygons
+        room_polygons = []
+        for rb in rBoundary:
+            if isinstance(rb, np.ndarray) and len(rb) > 0:
+                try:
+                    poly = Polygon(rb[:, :2] if rb.shape[1] >= 2 else rb)
+                    room_polygons.append(poly)
+                except:
+                    room_polygons.append(None)
+            else:
+                room_polygons.append(None)
+
+        # Clip each room
+        clipped_rooms = [None] * len(rBoundary)
+
+        for idx, room_idx in enumerate(order_indices):
+            if room_idx >= len(room_polygons) or room_polygons[room_idx] is None:
+                continue
+
+            # Start with the original room polygon
+            visible_polygon = room_polygons[room_idx]
+
+            # Clip to boundary
+            if visible_polygon.is_valid and boundary_poly.is_valid:
+                visible_polygon = visible_polygon.intersection(boundary_poly)
+
+            # Subtract all rooms that are drawn AFTER this one (on top)
+            for later_idx in order_indices[idx + 1:]:
+                if later_idx < len(room_polygons) and room_polygons[later_idx] is not None:
+                    if room_polygons[later_idx].is_valid:
+                        visible_polygon = visible_polygon.difference(room_polygons[later_idx])
+
+            # Convert back to numpy array
+            if not visible_polygon.is_empty:
+                if isinstance(visible_polygon, Polygon):
+                    clipped_rooms[room_idx] = np.array(list(visible_polygon.exterior.coords))
+                elif isinstance(visible_polygon, MultiPolygon):
+                    # For MultiPolygon, take the largest piece
+                    largest = max(visible_polygon.geoms, key=lambda p: p.area)
+                    clipped_rooms[room_idx] = np.array(list(largest.exterior.coords))
+            else:
+                clipped_rooms[room_idx] = None
+
+        print(f"[DXF] Clipped {len([r for r in clipped_rooms if r is not None])}/{len(rBoundary)} rooms")
+        return clipped_rooms
+
+    except Exception as e:
+        print(f"[DXF] Warning: Failed to clip polygons: {e}")
+        import traceback
+        traceback.print_exc()
+        return rBoundary
 
 
 def batch_export_dxf(mat_directory, output_directory, scale=1.0):

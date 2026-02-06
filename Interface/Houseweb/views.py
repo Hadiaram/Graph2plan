@@ -1232,6 +1232,7 @@ def Refine_Floorplan(request):
         - userRoomID: Floor plan identifier
         - threshold: (optional) Refinement threshold in pixels (default: 8.0)
         - method: (optional) Force method: 'python', 'matlab', or 'fallback'
+        - expand_living: (optional) If 'true', expand living room to fill boundary (default: false)
 
     Returns:
         JSON with refinement results and statistics
@@ -1239,6 +1240,7 @@ def Refine_Floorplan(request):
     userRoomID = request.GET.get("userRoomID")
     threshold = float(request.GET.get("threshold", "8.0"))
     force_method = request.GET.get("method", None)  # Optional: force a specific method
+    expand_living = request.GET.get("expand_living", "false").lower() == "true"  # Optional: expand living room
 
     if not userRoomID:
         return JsonResponse({
@@ -1261,12 +1263,34 @@ def Refine_Floorplan(request):
 
         # Extract necessary data
         boundary = fp_data['boundary']
-        boxes = fp_data['refineBox']  # Original boxes before refinement
         room_types = fp_data['rType'].flatten()
         edges = fp_data['rEdge']
+        
+        # ALWAYS keep original boxes for reference (used in Pass 2 pre-scan)
+        original_boxes = fp_data['refineBox']
+
+        # NEW: Track refinement pass (1 or 2)
+        # Store at top level of data dict to avoid structured array issues
+        if 'refinement_pass' in data:
+            current_pass = int(data['refinement_pass'][0, 0]) if data['refinement_pass'].size > 0 else 1
+        else:
+            current_pass = 1
+
+        # If we're on pass 3, reset to 1 (cycle back after completing 2 passes)
+        if current_pass > 2:
+            current_pass = 1
+
+        # CRITICAL: On Pass 2, use the refined boxes from Pass 1, not the original boxes!
+        if current_pass == 2 and 'newBox' in fp_data.dtype.names and fp_data['newBox'].size > 0:
+            boxes = fp_data['newBox']  # Use Pass 1 refined boxes
+            print(f"  Loading refined boxes from Pass 1 for Pass 2 refinement")
+        else:
+            boxes = original_boxes  # Original boxes (for Pass 1 or if no refined boxes exist)
 
         print(f"\n[Manual Refine] Processing {userRoomID}")
         print(f"  Boxes: {len(boxes)}, Threshold: {threshold}px, Force method: {force_method}")
+        print(f"  Refinement Pass: {current_pass}/2")
+        print(f"  Expand Living Room: {expand_living}")
 
         # Run refinement based on method preference
         refinement_method = "none"
@@ -1278,7 +1302,7 @@ def Refine_Floorplan(request):
         # Try Python refinement
         if (force_method is None or force_method == "python") and HAS_PYTHON_REFINEMENT:
             try:
-                print(f"[Manual Refine] Trying Python refinement...")
+                print(f"[Manual Refine] Trying Python refinement (pass {current_pass})...")
                 box_out, box_order, rBoundary = align_fp_python(
                     boundary=boundary,
                     boxes=boxes,
@@ -1286,7 +1310,10 @@ def Refine_Floorplan(request):
                     edges=edges,
                     fp_id=f"{userRoomID}_manual",
                     threshold=threshold,
-                    draw_result=False
+                    draw_result=False,
+                    refinement_pass=current_pass,  # Pass the current pass number
+                    expand_living_room=expand_living,  # Pass living room expansion flag
+                    original_boxes=original_boxes  # Pass original boxes for pre-scan
                 )
                 refinement_method = "python"
                 print(f"[Manual Refine] ✓ Python refinement successful!")
@@ -1357,9 +1384,14 @@ def Refine_Floorplan(request):
         data['data'][0, 0]['order'] = np.array(box_order)
         data['data'][0, 0]['rBoundary'] = np.array([np.array(rb) for rb in rBoundary], dtype=object)
 
+        # NEW: Store the NEXT pass number for the next refinement call
+        # Store at top level to avoid structured array field issues
+        next_pass = current_pass + 1 if current_pass < 2 else 1
+        data['refinement_pass'] = np.array([[next_pass]])
+
         # Save back to disk
         sio.savemat(mat_path, data)
-        print(f"[Manual Refine] ✓ Saved refined floor plan to disk")
+        print(f"[Manual Refine] ✓ Saved refined floor plan to disk (next pass will be {next_pass}/2)")
 
         # Format data for frontend rendering (same format as AdjustGraph response)
         roomret = []
@@ -1383,6 +1415,8 @@ def Refine_Floorplan(request):
             "success": True,
             "method": refinement_method,
             "threshold": threshold,
+            "refinement_pass": current_pass,  # Which pass was just executed
+            "next_pass": next_pass,  # Which pass will run next time
             "statistics": {
                 "total_boxes": len(boxes),
                 "boxes_changed": int(boxes_changed),
@@ -1390,7 +1424,7 @@ def Refine_Floorplan(request):
                 "max_displacement": float(np.max([np.sqrt(np.sum((original_boxes_np[i] - refined_boxes_np[i]) ** 2))
                                                   for i in range(len(boxes))]))
             },
-            "message": f"Refinement complete using {refinement_method} method",
+            "message": f"Refinement pass {current_pass}/2 complete using {refinement_method} method",
             # Add rendering data
             "roomret": roomret,
             "exterior": exterior,

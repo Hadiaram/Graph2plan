@@ -197,8 +197,9 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
                 print(f"[DXF] Drew {len(boxes)} room boxes (fallback)")
 
         # 4. Draw windows
-        if hasattr(fp_data, 'windows') and fp_data.windows is not None:
-            windows = np.array(fp_data.windows)
+        windows = _get_field(fp_data, 'windows')
+        if windows is not None:
+            windows = np.array(windows)
             window_count = 0
 
             for window in windows:
@@ -240,8 +241,9 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
             print(f"[DXF] Drew {window_count} windows")
 
         # 5. Draw door (first two boundary points)
-        if hasattr(fp_data, 'boundary') and fp_data.boundary is not None:
-            boundary = np.array(fp_data.boundary)
+        boundary = _get_field(fp_data, 'boundary')
+        if boundary is not None:
+            boundary = np.array(boundary)
             if len(boundary) >= 2:
                 door_p1 = (float(boundary[0][0]) * scale, float(boundary[0][1]) * scale)
                 door_p2 = (float(boundary[1][0]) * scale, float(boundary[1][1]) * scale)
@@ -272,28 +274,30 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
                 print(f"[DXF] Drew door at entry")
 
         # 6. Add optional dimensions
-        if include_dimensions and hasattr(fp_data, 'boundary'):
-            boundary = np.array(fp_data.boundary)
-            if len(boundary) > 0:
-                # Calculate overall dimensions
-                x_coords = boundary[:, 0]
-                y_coords = boundary[:, 1]
-                width = (np.max(x_coords) - np.min(x_coords)) * scale
-                height = (np.max(y_coords) - np.min(y_coords)) * scale
+        if include_dimensions:
+            boundary = _get_field(fp_data, 'boundary')
+            if boundary is not None:
+                boundary = np.array(boundary)
+                if len(boundary) > 0:
+                    # Calculate overall dimensions
+                    x_coords = boundary[:, 0]
+                    y_coords = boundary[:, 1]
+                    width = (np.max(x_coords) - np.min(x_coords)) * scale
+                    height = (np.max(y_coords) - np.min(y_coords)) * scale
 
-                # Add dimension text
-                dim_text = f"Width: {width:.2f} x Height: {height:.2f}"
-                msp.add_text(
-                    dim_text,
-                    dxfattribs={
-                        'layer': 'DIMENSIONS',
-                        'height': 3.0 * scale,
-                    }
-                ).set_placement(
-                    (float(np.min(x_coords)) * scale,
-                     float(np.max(y_coords) + 10) * scale),
-                    align=TextEntityAlignment.BOTTOM_LEFT
-                )
+                    # Add dimension text
+                    dim_text = f"Width: {width:.2f} x Height: {height:.2f}"
+                    msp.add_text(
+                        dim_text,
+                        dxfattribs={
+                            'layer': 'DIMENSIONS',
+                            'height': 3.0 * scale,
+                        }
+                    ).set_placement(
+                        (float(np.min(x_coords)) * scale,
+                         float(np.max(y_coords) + 10) * scale),
+                        align=TextEntityAlignment.BOTTOM_LEFT
+                    )
 
         # Save the DXF file
         doc.saveas(filepath)

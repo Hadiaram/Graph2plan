@@ -7,6 +7,7 @@ This module provides a drop-in replacement for MATLAB's align_fp function.
 import numpy as np
 from typing import Tuple, List, Union
 from .boundary_align import align_all_boxes_with_boundary
+from .expand_living_room import expand_living_room_to_boundary
 
 
 def align_fp_python(boundary: np.ndarray,
@@ -15,7 +16,10 @@ def align_fp_python(boundary: np.ndarray,
                    edges: np.ndarray,
                    fp_id: Union[str, int],
                    threshold: float = 8.0,
-                   draw_result: bool = False) -> Tuple[List, List, List]:
+                   draw_result: bool = False,
+                   refinement_pass: int = 1,
+                   expand_living_room: bool = False,
+                   original_boxes: np.ndarray = None) -> Tuple[List, List, List]:
     """
     Pure Python replacement for MATLAB align_fp() function.
 
@@ -35,6 +39,10 @@ def align_fp_python(boundary: np.ndarray,
         fp_id: Floor plan identifier (for debugging/logging)
         threshold: Snapping threshold in pixels (default: 8.0)
         draw_result: If True, save visualization (not implemented yet)
+        refinement_pass: Which refinement pass (1 or 2). Pass 1 snaps closest edge,
+                        Pass 2 snaps the orthogonal direction.
+        expand_living_room: If True, expand living room to fill boundary after alignment
+        original_boxes: Original unrefined boxes (used for Pass 2 pre-scan to determine axis)
 
     Returns:
         new_boxes: Refined boxes as list of lists [[x1,y1,x2,y2], ...]
@@ -53,18 +61,58 @@ def align_fp_python(boundary: np.ndarray,
 
     print(f"\n[Python Refinement] Processing floor plan {fp_id}")
     print(f"  Boxes: {len(boxes)}, Boundary vertices: {len(boundary)}, Threshold: {threshold}px")
+    print(f"  Refinement Pass: {refinement_pass}/2")
 
     # ============================================================
     # STEP 1: BOUNDARY ALIGNMENT ✅
     # ============================================================
-    print("  Step 1: Aligning boxes with boundary...")
+    
+    # Determine which axis to exclude based on the pass
+    # Pass 1: No exclusions, snap to closest edge (records which axis was used)
+    # Pass 2: Exclude the axis that was snapped in Pass 1 to force orthogonal snapping
+    
+    exclude_axis = None
+    # Determine per-box axis exclusion for pass 2
+    per_box_exclude = None
+    if refinement_pass == 2:
+        # On second pass, each box should snap the orthogonal axis from what it did in pass 1
+        # Use ORIGINAL boxes to determine what each box did in pass 1
+        boxes_for_prescan = original_boxes if original_boxes is not None else boxes
+        
+        # Quick pre-scan: Find out which axis each box used in pass 1
+        test_aligned, test_updated = align_all_boxes_with_boundary(
+            boxes_for_prescan, boundary, threshold=threshold, room_types=room_types, 
+            verbose=False, exclude_axis=None, refinement_pass=1
+        )
+        
+        # For each box, determine which axis to exclude in pass 2
+        per_box_exclude = []
+        for i, edges in enumerate(test_updated):
+            horizontal_snapped = edges.get('left', False) or edges.get('right', False)
+            vertical_snapped = edges.get('top', False) or edges.get('bottom', False)
+            
+            # If this box snapped horizontally in pass 1, exclude horizontal in pass 2 (force vertical)
+            # If this box snapped vertically in pass 1, exclude vertical in pass 2 (force horizontal)
+            if horizontal_snapped:
+                per_box_exclude.append('horizontal')
+            elif vertical_snapped:
+                per_box_exclude.append('vertical')
+            else:
+                # Box didn't snap in pass 1, allow both axes in pass 2
+                per_box_exclude.append(None)
+        
+        print(f"  Pass 2: Using per-box axis exclusion based on Pass 1 behavior")
+        
+    print(f"  Step 1: Aligning boxes with boundary...")
 
     aligned_boxes, updated_edges = align_all_boxes_with_boundary(
         boxes,
         boundary,
         threshold=threshold,
         room_types=room_types,
-        verbose=True  # Enable verbose logging to debug
+        verbose=True,  # Enable verbose logging to debug
+        exclude_axis=per_box_exclude if refinement_pass == 2 else None,
+        refinement_pass=refinement_pass
     )
 
     n_updated = sum(1 for edges_dict in updated_edges if any(edges_dict.values()))
@@ -85,6 +133,21 @@ def align_fp_python(boundary: np.ndarray,
     # TODO: Implement gap filling
     # For now, just use neighbor-aligned boxes
     final_boxes = neighbor_aligned_boxes.copy()
+
+    # ============================================================
+    # STEP 3.5: LIVING ROOM EXPANSION (OPTIONAL)
+    # ============================================================
+    # Only expand living room after Pass 2 is complete (after all snapping is done)
+    if expand_living_room and refinement_pass == 2:
+        print("  Step 3.5: Expanding living room to fill boundary (Pass 2 complete)...")
+        final_boxes = expand_living_room_to_boundary(
+            final_boxes,
+            room_types,
+            boundary,
+            verbose=True
+        )
+    elif expand_living_room and refinement_pass == 1:
+        print("  Step 3.5: Skipping living room expansion (waiting for Pass 2)...")
 
     # ============================================================
     # STEP 4: POLYGON GENERATION (TODO)

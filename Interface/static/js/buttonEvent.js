@@ -1413,7 +1413,9 @@ function CreateLeftGraph(rooms, roomID) {
 
             // Extract base ID: "14926.png" -> "14926"
             var userRoomID = hsname.split(".")[0];
-            var threshold = 30.0; // Default threshold (increased from 8.0 for better snapping)
+            var threshold = 50.0; // Default threshold (increased from 8.0 for better snapping)4
+            // Check if we should expand living room (always true for now to test)
+            var expandLiving = true;  // Set to true to automatically expand living room
 
             // Show loading state
             var refineBtn = document.getElementById("refineButton");
@@ -1427,7 +1429,8 @@ function CreateLeftGraph(rooms, roomID) {
             // Call the refinement endpoint
             $.get("/index/Refine_Floorplan/", {
                 'userRoomID': userRoomID,
-                'threshold': threshold
+                'threshold': threshold,
+                'expand_living': expandLiving
             }, function (data) {
                 // Reset button state
                 refineBtn.innerHTML = originalText;
@@ -1437,7 +1440,17 @@ function CreateLeftGraph(rooms, roomID) {
                 if (data.success) {
                     console.log("[Refine Button] Success!", data);
                     var stats = data.statistics;
+                    
+                    // Show which pass was executed and what's next
+                    var passInfo = "Pass " + data.refinement_pass + " of 2";
+                    if (data.next_pass === 1) {
+                        passInfo += " (Complete! Next click will restart at Pass 1)";
+                    } else {
+                        passInfo += " (Next click will run Pass " + data.next_pass + ")";
+                    }
+                    
                     var message = "✅ Refinement Complete!\n\n" +
+                                passInfo + "\n\n" +
                                 "Method: " + data.method + "\n" +
                                 "Threshold: " + data.threshold + "px\n\n" +
                                 "Boxes changed: " + stats.boxes_changed + "/" + stats.total_boxes + "\n" +

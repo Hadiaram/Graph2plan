@@ -6,7 +6,7 @@ This module provides a drop-in replacement for MATLAB's align_fp function.
 
 import numpy as np
 from typing import Tuple, List, Union
-from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, fill_small_boundary_gaps
+from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, fill_small_boundary_gaps, resolve_room_overlaps
 from .expand_living_room import expand_living_room_to_boundary
 
 
@@ -138,9 +138,17 @@ def align_fp_python(boundary: np.ndarray,
     # STEP 2: ROOM-TO-ROOM SNAPPING (Pass 3 only)
     # ============================================================
     if refinement_pass == 3:
-        print("  Step 2: Room-to-room snapping...")
-        neighbor_aligned_boxes = snap_rooms_to_neighbors(
+        print("  Step 2a: Resolving room overlaps...")
+        overlap_resolved_boxes = resolve_room_overlaps(
             aligned_boxes,
+            room_types,
+            boundary,
+            verbose=True
+        )
+
+        print("  Step 2b: Room-to-room snapping (closing gaps)...")
+        neighbor_aligned_boxes = snap_rooms_to_neighbors(
+            overlap_resolved_boxes,
             room_types,
             edges,
             boundary,

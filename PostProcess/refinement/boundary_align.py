@@ -743,6 +743,164 @@ def align_all_boxes_with_boundary(boxes: np.ndarray, boundary: np.ndarray,
     return aligned_boxes, all_updated_edges
 
 
+def resolve_room_overlaps(boxes: np.ndarray,
+                          room_types: np.ndarray,
+                          boundary: np.ndarray,
+                          verbose: bool = False) -> np.ndarray:
+    """
+    Resolve overlapping rooms by snapping them edge-to-edge.
+
+    Only resolves overlaps between rooms that are neither bathrooms (type 3)
+    nor living rooms (type 0). Bathrooms are allowed to be hosted inside
+    other rooms. Living rooms are excluded entirely.
+
+    For each overlapping pair, the room attached to fewer walls is moved.
+    Movement is in the direction of minimum overlap to minimize displacement.
+    Detachment prevention still applies.
+
+    Args:
+        boxes: Nx4 array of boxes [[x1, y1, x2, y2], ...]
+        room_types: Room type indices (0=Living, 3=Bathroom, etc.)
+        boundary: Boundary polygon for wall attachment checking
+        verbose: Print debug information
+
+    Returns:
+        resolved_boxes: Nx4 array with overlaps resolved
+    """
+    n_boxes = len(boxes)
+    resolved_boxes = boxes.copy()
+
+    h_segments, v_segments = extract_boundary_segments(boundary)
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"RESOLVING ROOM OVERLAPS - {n_boxes} boxes")
+        print(f"{'='*60}")
+
+    room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+                       4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+                       8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage", 12: "Wall"}
+
+    n_resolved = 0
+
+    # Check every pair of rooms for overlaps
+    for i in range(n_boxes):
+        # Skip living room and bathroom - they are excluded from overlap resolution
+        if room_types[i] == 0 or room_types[i] == 3:
+            continue
+
+        box_i = Box.from_array(resolved_boxes[i])
+
+        for j in range(i + 1, n_boxes):
+            # Skip living room and bathroom as the other room too
+            if room_types[j] == 0 or room_types[j] == 3:
+                continue
+
+            box_j = Box.from_array(resolved_boxes[j])
+
+            # Calculate overlap
+            overlap_x = min(box_i.x2, box_j.x2) - max(box_i.x1, box_j.x1)
+            overlap_y = min(box_i.y2, box_j.y2) - max(box_i.y1, box_j.y1)
+
+            if overlap_x <= 0 or overlap_y <= 0:
+                continue  # No overlap
+
+            if verbose:
+                name_i = room_type_names.get(room_types[i], f"Type{room_types[i]}")
+                name_j = room_type_names.get(room_types[j], f"Type{room_types[j]}")
+                print(f"\n  Overlap: Box {i} ({name_i}) ↔ Box {j} ({name_j})")
+                print(f"    Overlap: x={overlap_x:.2f}px, y={overlap_y:.2f}px")
+
+            # Determine which room to move: prefer moving the one with fewer wall attachments
+            alignments_i = find_closest_segments(box_i, h_segments, v_segments)
+            alignments_j = find_closest_segments(box_j, h_segments, v_segments)
+            walls_i = sum(1 for a in alignments_i.values() if a.distance < 0.1)
+            walls_j = sum(1 for a in alignments_j.values() if a.distance < 0.1)
+
+            # Build candidate move orders: try fewer-walls room first, other room second
+            if walls_j < walls_i:
+                candidates = [(j, i, box_j, box_i, alignments_j),
+                              (i, j, box_i, box_j, alignments_i)]
+            else:
+                candidates = [(i, j, box_i, box_j, alignments_i),
+                              (j, i, box_j, box_i, alignments_j)]
+
+            resolved = False
+            for move_idx, stay_idx, move_box, stay_box, move_alignments in candidates:
+                # Determine snap direction: minimum overlap axis
+                if overlap_x <= overlap_y:
+                    # Resolve horizontally (smaller overlap)
+                    move_center_x = (move_box.x1 + move_box.x2) / 2
+                    stay_center_x = (stay_box.x1 + stay_box.x2) / 2
+
+                    if move_center_x < stay_center_x:
+                        snap_delta = stay_box.x1 - move_box.x2
+                        edge_to_check = 'right'
+                        snap_value = stay_box.x1
+                    else:
+                        snap_delta = stay_box.x2 - move_box.x1
+                        edge_to_check = 'left'
+                        snap_value = stay_box.x2
+
+                    new_move_box = Box(move_box.x1 + snap_delta, move_box.y1,
+                                      move_box.x2 + snap_delta, move_box.y2)
+                else:
+                    # Resolve vertically (smaller overlap)
+                    move_center_y = (move_box.y1 + move_box.y2) / 2
+                    stay_center_y = (stay_box.y1 + stay_box.y2) / 2
+
+                    if move_center_y < stay_center_y:
+                        snap_delta = stay_box.y1 - move_box.y2
+                        edge_to_check = 'bottom'
+                        snap_value = stay_box.y1
+                    else:
+                        snap_delta = stay_box.y2 - move_box.y1
+                        edge_to_check = 'top'
+                        snap_value = stay_box.y2
+
+                    new_move_box = Box(move_box.x1, move_box.y1 + snap_delta,
+                                      move_box.x2, move_box.y2 + snap_delta)
+
+                # Check if this would detach from walls
+                would_detach, detached_edges = would_detach_from_walls(
+                    move_box, edge_to_check, snap_value, move_alignments, tolerance=0.1
+                )
+
+                if would_detach:
+                    if verbose:
+                        name_move = room_type_names.get(room_types[move_idx], f"Type{room_types[move_idx]}")
+                        print(f"    ⊗ Cannot move Box {move_idx} ({name_move}) - would detach from: {', '.join(detached_edges)}, trying other room...")
+                    continue  # Try the other room in the pair
+
+                # Apply the resolution
+                resolved_boxes[move_idx] = new_move_box.to_array()
+
+                # Update local box references so subsequent pairs use new positions
+                if move_idx == i:
+                    box_i = new_move_box
+                else:
+                    box_j = new_move_box
+
+                n_resolved += 1
+                resolved = True
+                if verbose:
+                    name_move = room_type_names.get(room_types[move_idx], f"Type{room_types[move_idx]}")
+                    print(f"    ✓ Moved Box {move_idx} ({name_move}) by {snap_delta:.2f}px to resolve overlap")
+                break  # Overlap resolved, move on
+
+            if not resolved and verbose:
+                name_i = room_type_names.get(room_types[i], f"Type{room_types[i]}")
+                name_j = room_type_names.get(room_types[j], f"Type{room_types[j]}")
+                print(f"    ✗ Could not resolve overlap between Box {i} ({name_i}) and Box {j} ({name_j}) - both rooms locked by walls")
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"✓ Resolved {n_resolved} overlapping room pairs")
+        print(f"{'='*60}\n")
+
+    return resolved_boxes
+
+
 def snap_rooms_to_neighbors(boxes: np.ndarray,
                             room_types: np.ndarray,
                             edges: np.ndarray,
@@ -812,6 +970,9 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
         alignments = find_closest_segments(box, h_segments, v_segments)
         n_walls_attached = sum(1 for alignment in alignments.values() if alignment.distance < 0.1)
 
+        # Find neighbor rooms (needed before the n_walls_attached check below)
+        neighbors = adjacency.get(i, set())
+
         if n_walls_attached >= 2:
             # Check if there are any non-touching graph neighbors (excluding living room)
             # If there's a gap to a neighbor, allow movement to close the gap
@@ -863,8 +1024,6 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
                 if verbose:
                     print(f"  ✓ Attached to {n_walls_attached} walls but has gap to neighbor, allowing movement")
 
-        # Find neighbor rooms
-        neighbors = adjacency.get(i, set())
         if not neighbors:
             if verbose:
                 print(f"  ⊗ Skipping (no neighbors in adjacency graph)")

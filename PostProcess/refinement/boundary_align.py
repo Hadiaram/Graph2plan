@@ -1041,6 +1041,16 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
         for neighbor_idx in neighbors:
             neighbor_box = Box.from_array(snapped_boxes[neighbor_idx])
 
+            # Check if already overlapping with this neighbor
+            already_overlapping = (
+                box.x1 < neighbor_box.x2 and box.x2 > neighbor_box.x1 and
+                box.y1 < neighbor_box.y2 and box.y2 > neighbor_box.y1
+            )
+            # Bathrooms not already inside a room should only use "aligning" snaps
+            # (edge-to-edge), not "matching" snaps (same-edge-to-same-edge), which
+            # would pull the bathroom inside the neighbor.
+            allow_matching_snaps = not (room_type == 3 and not already_overlapping)
+
             # Calculate distances to each edge of the neighbor
             # Left edge of neighbor (vertical line at neighbor.x1)
             if box.y2 > neighbor_box.y1 and box.y1 < neighbor_box.y2:  # Vertical overlap
@@ -1053,7 +1063,7 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
                     best_snap_delta = neighbor_box.x1 - box.x2
                     best_axis = 'horizontal'
 
-                if dist_from_left < best_distance and dist_from_left <= threshold:
+                if allow_matching_snaps and dist_from_left < best_distance and dist_from_left <= threshold:
                     best_distance = dist_from_left
                     best_edge = 'left_to_left'
                     best_snap_delta = neighbor_box.x1 - box.x1
@@ -1070,7 +1080,7 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
                     best_snap_delta = neighbor_box.x2 - box.x1
                     best_axis = 'horizontal'
 
-                if dist_from_right < best_distance and dist_from_right <= threshold:
+                if allow_matching_snaps and dist_from_right < best_distance and dist_from_right <= threshold:
                     best_distance = dist_from_right
                     best_edge = 'right_to_right'
                     best_snap_delta = neighbor_box.x2 - box.x2
@@ -1087,7 +1097,7 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
                     best_snap_delta = neighbor_box.y1 - box.y2
                     best_axis = 'vertical'
 
-                if dist_from_top < best_distance and dist_from_top <= threshold:
+                if allow_matching_snaps and dist_from_top < best_distance and dist_from_top <= threshold:
                     best_distance = dist_from_top
                     best_edge = 'top_to_top'
                     best_snap_delta = neighbor_box.y1 - box.y1
@@ -1104,7 +1114,7 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
                     best_snap_delta = neighbor_box.y2 - box.y1
                     best_axis = 'vertical'
 
-                if dist_from_bottom < best_distance and dist_from_bottom <= threshold:
+                if allow_matching_snaps and dist_from_bottom < best_distance and dist_from_bottom <= threshold:
                     best_distance = dist_from_bottom
                     best_edge = 'bottom_to_bottom'
                     best_snap_delta = neighbor_box.y2 - box.y2
@@ -1153,6 +1163,35 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
         if would_detach:
             if verbose:
                 print(f"  ⊗ Skipping (would detach from walls: {', '.join(detached_edges)})")
+            continue
+
+        # Check if the snap would create new overlaps with non-bathroom rooms
+        creates_new_overlap = False
+        for k in range(len(snapped_boxes)):
+            if k == i:
+                continue
+            if room_types[k] == 3:  # Bathrooms can overlap anything
+                continue
+            if room_types[k] == 0:  # Living room handled separately
+                continue
+
+            other_box = Box.from_array(snapped_boxes[k])
+
+            new_overlaps = (new_box.x1 < other_box.x2 and new_box.x2 > other_box.x1 and
+                            new_box.y1 < other_box.y2 and new_box.y2 > other_box.y1)
+            currently_overlaps = (box.x1 < other_box.x2 and box.x2 > other_box.x1 and
+                                  box.y1 < other_box.y2 and box.y2 > other_box.y1)
+
+            if new_overlaps and not currently_overlaps:
+                creates_new_overlap = True
+                if verbose:
+                    room_type_names_local = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen",
+                                             3: "Bathroom", 4: "DiningRoom", 5: "ChildRoom"}
+                    name_k = room_type_names_local.get(room_types[k], f"Type{room_types[k]}")
+                    print(f"  ⊗ Skipping (would create new overlap with Box {k} ({name_k}))")
+                break
+
+        if creates_new_overlap:
             continue
 
         # Apply the snap

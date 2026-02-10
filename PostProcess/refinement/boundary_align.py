@@ -1209,6 +1209,163 @@ def snap_rooms_to_neighbors(boxes: np.ndarray,
     return snapped_boxes
 
 
+def fill_inter_room_gaps(boxes: np.ndarray,
+                         room_types: np.ndarray,
+                         boundary: np.ndarray,
+                         gap_threshold: float = 20.0,
+                         verbose: bool = False) -> np.ndarray:
+    """
+    Expand rooms to fill small gaps between adjacent non-living rooms.
+
+    Scans every pair of rooms for gaps in the horizontal and vertical directions.
+    When two rooms are close but not touching (gap <= gap_threshold) and they
+    overlap in the perpendicular axis, the room with fewer wall attachments has
+    its edge expanded to close the gap.
+
+    This catches coverage gaps that are not against a boundary wall (which
+    fill_small_boundary_gaps cannot detect) and are not closed by
+    snap_rooms_to_neighbors (which translates whole rooms).
+
+    Args:
+        boxes: Nx4 array of boxes [[x1, y1, x2, y2], ...]
+        room_types: Room type indices (0=Living, 3=Bathroom, etc.)
+        boundary: Boundary polygon
+        gap_threshold: Maximum gap size to fill (pixels)
+        verbose: Print debug information
+
+    Returns:
+        filled_boxes: Nx4 array with inter-room gaps filled
+    """
+    n_boxes = len(boxes)
+    filled_boxes = boxes.copy()
+    h_segments, v_segments = extract_boundary_segments(boundary)
+    n_expanded = 0
+
+    room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+                       4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+                       8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage"}
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"INTER-ROOM GAP FILL - {n_boxes} boxes, threshold: {gap_threshold:.1f}px")
+        print(f"{'='*60}")
+
+    # Up to 3 passes to handle cascading fills
+    for _ in range(3):
+        changed = False
+
+        for i in range(n_boxes):
+            if room_types[i] == 0:
+                continue  # Living room handled separately
+
+            box_i = Box.from_array(filled_boxes[i])
+            align_i = find_closest_segments(box_i, h_segments, v_segments)
+            walls_i = sum(1 for a in align_i.values() if a.distance < 0.1)
+
+            for j in range(n_boxes):
+                if j == i or room_types[j] == 0:
+                    continue
+
+                box_j = Box.from_array(filled_boxes[j])
+
+                # --- Horizontal gap: i is to the left of j ---
+                h_gap = box_j.x1 - box_i.x2
+                if 0 < h_gap <= gap_threshold:
+                    v_overlap = min(box_i.y2, box_j.y2) - max(box_i.y1, box_j.y1)
+                    if v_overlap > 0:
+                        align_j = find_closest_segments(box_j, h_segments, v_segments)
+                        walls_j = sum(1 for a in align_j.values() if a.distance < 0.1)
+
+                        # Expand the room with fewer wall attachments
+                        if walls_i <= walls_j:
+                            # Expand i's right edge to j's left edge
+                            new_box = Box(box_i.x1, box_i.y1, box_j.x1, box_i.y2)
+                            expand_idx = i
+                        else:
+                            # Expand j's left edge to i's right edge
+                            new_box = Box(box_i.x2, box_j.y1, box_j.x2, box_j.y2)
+                            expand_idx = j
+
+                        # Check that expansion doesn't create new overlaps
+                        orig = Box.from_array(filled_boxes[expand_idx])
+                        ok = True
+                        for k in range(n_boxes):
+                            if k == expand_idx or room_types[k] == 3 or room_types[k] == 0:
+                                continue
+                            other = Box.from_array(filled_boxes[k])
+                            new_overlaps = (new_box.x1 < other.x2 and new_box.x2 > other.x1 and
+                                            new_box.y1 < other.y2 and new_box.y2 > other.y1)
+                            was_overlapping = (orig.x1 < other.x2 and orig.x2 > other.x1 and
+                                               orig.y1 < other.y2 and orig.y2 > other.y1)
+                            if new_overlaps and not was_overlapping:
+                                ok = False
+                                break
+
+                        if ok:
+                            name = room_type_names.get(room_types[expand_idx], f"Type{room_types[expand_idx]}")
+                            other_idx = j if expand_idx == i else i
+                            if verbose:
+                                print(f"  ✓ Expanded Box {expand_idx} ({name}) right/left by "
+                                      f"{h_gap:.1f}px to close gap with Box {other_idx}")
+                            filled_boxes[expand_idx] = new_box.to_array()
+                            # Refresh box_i if we just changed it
+                            if expand_idx == i:
+                                box_i = new_box
+                            n_expanded += 1
+                            changed = True
+
+                # --- Vertical gap: i is above j ---
+                v_gap = box_j.y1 - box_i.y2
+                if 0 < v_gap <= gap_threshold:
+                    h_overlap = min(box_i.x2, box_j.x2) - max(box_i.x1, box_j.x1)
+                    if h_overlap > 0:
+                        align_j = find_closest_segments(box_j, h_segments, v_segments)
+                        walls_j = sum(1 for a in align_j.values() if a.distance < 0.1)
+
+                        if walls_i <= walls_j:
+                            new_box = Box(box_i.x1, box_i.y1, box_i.x2, box_j.y1)
+                            expand_idx = i
+                        else:
+                            new_box = Box(box_j.x1, box_i.y2, box_j.x2, box_j.y2)
+                            expand_idx = j
+
+                        orig = Box.from_array(filled_boxes[expand_idx])
+                        ok = True
+                        for k in range(n_boxes):
+                            if k == expand_idx or room_types[k] == 3 or room_types[k] == 0:
+                                continue
+                            other = Box.from_array(filled_boxes[k])
+                            new_overlaps = (new_box.x1 < other.x2 and new_box.x2 > other.x1 and
+                                            new_box.y1 < other.y2 and new_box.y2 > other.y1)
+                            was_overlapping = (orig.x1 < other.x2 and orig.x2 > other.x1 and
+                                               orig.y1 < other.y2 and orig.y2 > other.y1)
+                            if new_overlaps and not was_overlapping:
+                                ok = False
+                                break
+
+                        if ok:
+                            name = room_type_names.get(room_types[expand_idx], f"Type{room_types[expand_idx]}")
+                            other_idx = j if expand_idx == i else i
+                            if verbose:
+                                print(f"  ✓ Expanded Box {expand_idx} ({name}) top/bottom by "
+                                      f"{v_gap:.1f}px to close gap with Box {other_idx}")
+                            filled_boxes[expand_idx] = new_box.to_array()
+                            if expand_idx == i:
+                                box_i = new_box
+                            n_expanded += 1
+                            changed = True
+
+        if not changed:
+            break
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"✓ Filled {n_expanded} inter-room gaps")
+        print(f"{'='*60}\n")
+
+    return filled_boxes
+
+
 def fill_small_boundary_gaps(boxes: np.ndarray,
                              room_types: np.ndarray,
                              boundary: np.ndarray,
@@ -1342,6 +1499,176 @@ def fill_small_boundary_gaps(boxes: np.ndarray,
         print(f"{'='*60}\n")
 
     return expanded_boxes
+
+
+def fill_coverage_gaps(boxes: np.ndarray,
+                       room_types: np.ndarray,
+                       boundary: np.ndarray,
+                       min_gap_area: float = 4.0,
+                       verbose: bool = False) -> np.ndarray:
+    """
+    Detect and fill any areas inside the boundary not covered by any room.
+
+    After living room expansion, computes the exact uncovered regions as
+    (boundary polygon - union of all room polygons) using Shapely. For each
+    gap, finds adjacent non-living rooms and expands the best candidate's
+    bounding box to absorb the gap.
+
+    This is geometry-based and does not use ray casting, so it catches corner
+    pockets that ray-casting-based functions miss (e.g. step-wall notches where
+    the room center is above the visible wall segment).
+
+    Requires Shapely. Returns boxes unchanged if Shapely is not available.
+
+    Args:
+        boxes: Nx4 array of boxes [[x1, y1, x2, y2], ...]
+        room_types: Room type indices (0=Living, 3=Bathroom, etc.)
+        boundary: Boundary polygon (Nx2 or Nx4 array)
+        min_gap_area: Ignore gaps smaller than this many px² (floating-point noise)
+        verbose: Print debug information
+
+    Returns:
+        filled_boxes: Nx4 array with coverage gaps filled
+    """
+    try:
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+    except ImportError:
+        if verbose:
+            print("  Shapely not available, skipping coverage gap fill")
+        return boxes.copy()
+
+    n_boxes = len(boxes)
+    filled_boxes = boxes.copy()
+
+    h_segments, v_segments = extract_boundary_segments(boundary)
+
+    room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+                       4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+                       8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage", 12: "Wall"}
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"COVERAGE GAP FILL - {n_boxes} boxes")
+        print(f"{'='*60}")
+
+    def make_poly(b):
+        x1, y1, x2, y2 = float(b[0]), float(b[1]), float(b[2]), float(b[3])
+        return Polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
+
+    # Build boundary polygon
+    bnd_pts = boundary[:, :2].astype(float)
+    boundary_poly = Polygon(bnd_pts)
+    if not boundary_poly.is_valid:
+        boundary_poly = boundary_poly.buffer(0)
+
+    # Build room polygons
+    room_polys = [make_poly(b) for b in filled_boxes]
+
+    # Compute uncovered area inside the boundary
+    covered = unary_union(room_polys)
+    uncovered = boundary_poly.difference(covered)
+
+    if uncovered.is_empty:
+        if verbose:
+            print("  No coverage gaps found")
+        return filled_boxes
+
+    # Collect individual gap polygons above the minimum area threshold
+    gaps = []
+    if hasattr(uncovered, 'geoms'):
+        for g in uncovered.geoms:
+            if g.area >= min_gap_area:
+                gaps.append(g)
+    elif uncovered.area >= min_gap_area:
+        gaps = [uncovered]
+
+    if not gaps:
+        if verbose:
+            print("  No significant coverage gaps found")
+        return filled_boxes
+
+    if verbose:
+        print(f"  Found {len(gaps)} gap(s) to fill")
+
+    n_filled = 0
+    for gap_idx, gap in enumerate(gaps):
+        bx = gap.bounds  # (minx, miny, maxx, maxy)
+        if verbose:
+            print(f"\n  Gap {gap_idx}: area={gap.area:.1f}px², "
+                  f"bounds=[{bx[0]:.1f},{bx[1]:.1f} → {bx[2]:.1f},{bx[3]:.1f}]")
+
+        # Find non-living rooms that touch or are within 1px of the gap
+        gap_expanded = gap.buffer(1.0)
+        adjacent = []
+        for i in range(n_boxes):
+            if room_types[i] == 0:
+                continue  # Living room already expanded - skip as candidate
+            if not room_polys[i].intersects(gap_expanded):
+                continue
+
+            # Measure how much boundary the room shares with the gap
+            shared = room_polys[i].boundary.intersection(gap.boundary)
+            shared_length = shared.length if not shared.is_empty else 0.0
+
+            # Count current wall attachments (fewer = more free to expand)
+            box_i = Box.from_array(filled_boxes[i])
+            alignments = find_closest_segments(box_i, h_segments, v_segments)
+            walls = sum(1 for a in alignments.values() if a.distance < 0.1)
+
+            adjacent.append((i, shared_length, walls))
+
+        if not adjacent:
+            if verbose:
+                print(f"    No adjacent non-living rooms found")
+            continue
+
+        # Prefer the room with fewer wall attachments (more free to move),
+        # breaking ties by longest shared edge with the gap
+        adjacent.sort(key=lambda x: (x[2], -x[1]))
+
+        filled = False
+        for room_idx, shared_len, walls in adjacent:
+            # Expand the room's bounding box to include the entire gap
+            combined_bounds = room_polys[room_idx].union(gap).bounds
+            new_box = Box(combined_bounds[0], combined_bounds[1],
+                          combined_bounds[2], combined_bounds[3])
+            new_poly = make_poly(new_box.to_array())
+
+            # Verify the expansion doesn't create meaningful overlap with other rooms
+            ok = True
+            for k in range(n_boxes):
+                if k == room_idx or room_types[k] == 0 or room_types[k] == 3:
+                    continue  # Skip self, living room, and bathrooms (bathrooms are hosted inside rooms)
+                intersection_area = new_poly.intersection(room_polys[k]).area
+                if intersection_area > 1.0:  # >1px² = real overlap, not just touching
+                    ok = False
+                    if verbose:
+                        name_k = room_type_names.get(room_types[k], f"Type{room_types[k]}")
+                        print(f"    ✗ Box {room_idx} expansion blocked by Box {k} ({name_k}), "
+                              f"overlap={intersection_area:.1f}px²")
+                    break
+
+            if ok:
+                filled_boxes[room_idx] = new_box.to_array()
+                room_polys[room_idx] = new_poly  # Update so later gaps see the new position
+                n_filled += 1
+                filled = True
+                if verbose:
+                    name = room_type_names.get(room_types[room_idx], f"Type{room_types[room_idx]}")
+                    print(f"    ✓ Expanded Box {room_idx} ({name}) "
+                          f"(walls={walls}, shared={shared_len:.1f}px)")
+                break
+
+        if not filled and verbose:
+            print(f"    ✗ Could not fill gap (all adjacent rooms blocked)")
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"✓ Filled {n_filled}/{len(gaps)} coverage gap(s)")
+        print(f"{'='*60}\n")
+
+    return filled_boxes
 
 
 if __name__ == "__main__":

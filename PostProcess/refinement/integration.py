@@ -6,7 +6,7 @@ This module provides a drop-in replacement for MATLAB's align_fp function.
 
 import numpy as np
 from typing import Tuple, List, Union
-from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, fill_small_boundary_gaps, resolve_room_overlaps
+from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, fill_small_boundary_gaps, fill_inter_room_gaps, resolve_room_overlaps, fill_coverage_gaps
 from .expand_living_room import expand_living_room_to_boundary
 
 
@@ -155,6 +155,7 @@ def align_fp_python(boundary: np.ndarray,
             threshold=threshold,
             verbose=True
         )
+
     else:
         print("  Step 2: Room-to-room snapping (skipped - only runs in Pass 3)")
         neighbor_aligned_boxes = aligned_boxes.copy()
@@ -168,7 +169,27 @@ def align_fp_python(boundary: np.ndarray,
             neighbor_aligned_boxes,
             room_types,
             boundary,
-            gap_threshold=20.0,  # Fill gaps up to 20 pixels
+            gap_threshold=20.0,
+            verbose=True
+        )
+        print("  Step 3b: Filling boundary gaps for bathrooms (extended threshold)...")
+        # Bathrooms may move to a new boundary section during neighbor snapping,
+        # leaving a larger gap. Run a second pass for bathrooms only with a
+        # higher threshold. Non-bathrooms are masked as type 0 (skipped).
+        bathroom_only_types = np.where(room_types == 3, 3, 0)
+        gap_filled_boxes = fill_small_boundary_gaps(
+            gap_filled_boxes,
+            bathroom_only_types,
+            boundary,
+            gap_threshold=threshold * 2,
+            verbose=True
+        )
+        print("  Step 3.5: Filling inter-room gaps...")
+        gap_filled_boxes = fill_inter_room_gaps(
+            gap_filled_boxes,
+            room_types,
+            boundary,
+            gap_threshold=20.0,
             verbose=True
         )
     else:
@@ -197,6 +218,22 @@ def align_fp_python(boundary: np.ndarray,
         )
     elif expand_living_room:
         print(f"  Step 3.5: Skipping living room expansion (waiting for Pass 3)...")
+
+    # ============================================================
+    # STEP 5: COVERAGE GAP FILL (Pass 3 only, after living room expansion)
+    # ============================================================
+    # Detect any remaining uncovered pockets inside the boundary using Shapely
+    # (boundary polygon minus union of all rooms). Expands the adjacent room to
+    # absorb each gap. This catches corner pockets that ray-casting-based
+    # functions miss (e.g. step-wall notches).
+    if refinement_pass == 3:
+        print("  Step 5: Filling coverage gaps (Shapely)...")
+        final_boxes = fill_coverage_gaps(
+            final_boxes,
+            room_types,
+            boundary,
+            verbose=True
+        )
 
     # ============================================================
     # STEP 4: POLYGON GENERATION (TODO)

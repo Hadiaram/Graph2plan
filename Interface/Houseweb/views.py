@@ -18,6 +18,11 @@ import pandas as pd # type: ignore
 import warnings
 import sys
 from pathlib import Path
+try:
+    from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box, Point as ShapelyPoint
+    HAS_SHAPELY_VIEWS = True
+except ImportError:
+    HAS_SHAPELY_VIEWS = False
 
 # Try to import DXF export
 HAS_DXF_EXPORT = False
@@ -68,6 +73,47 @@ DXF_WALL_THICKNESS = 3.0  # Wall thickness in drawing units
 
 # DXF Save Path
 DXF_SAVE_PATH = r"C:\Users\hmbashir\source\DXF Floor Plans"  # Change this to your desired path
+
+
+def _clip_box_to_polygon(x1, y1, x2, y2, xmin, xmax, ymin, ymax, margin, boundary_shape):
+    """
+    Clip a box to the boundary bounding box, then translate it so its
+    center is inside the actual boundary polygon (for non-rectangular boundaries).
+    Returns (x1, y1, x2, y2).
+    """
+    # Step 1: bounding-box clamp
+    x1 = max(xmin + margin, min(x1, xmax - margin))
+    x2 = max(xmin + margin, min(x2, xmax - margin))
+    y1 = max(ymin + margin, min(y1, ymax - margin))
+    y2 = max(ymin + margin, min(y2, ymax - margin))
+    if x2 <= x1: x2 = x1 + 10
+    if y2 <= y1: y2 = y1 + 10
+
+    # Step 2: polygon-aware translation (requires Shapely)
+    if HAS_SHAPELY_VIEWS and boundary_shape is not None:
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        if not boundary_shape.contains(ShapelyPoint(cx, cy)):
+            box_geom = shapely_box(x1, y1, x2, y2)
+            intersection = box_geom.intersection(boundary_shape)
+            w, h = x2 - x1, y2 - y1
+            if not intersection.is_empty and intersection.area >= 10:
+                icx, icy = intersection.centroid.x, intersection.centroid.y
+            else:
+                # Box entirely outside polygon – fall back to polygon centroid
+                icx, icy = boundary_shape.centroid.x, boundary_shape.centroid.y
+            x1 = icx - w / 2.0
+            x2 = icx + w / 2.0
+            y1 = icy - h / 2.0
+            y2 = icy + h / 2.0
+            # Re-clamp after translation
+            x1 = max(xmin + margin, min(x1, xmax - margin))
+            x2 = max(xmin + margin, min(x2, xmax - margin))
+            y1 = max(ymin + margin, min(y1, ymax - margin))
+            y2 = max(ymin + margin, min(y2, ymax - margin))
+            if x2 <= x1: x2 = x1 + 10
+            if y2 <= y1: y2 = y1 + 10
+
+    return x1, y1, x2, y2
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -675,15 +721,29 @@ def TransGraph(request):
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
     area_ = (ymax - ymin) * (xmax - xmin)
+    boundary_shape = ShapelyPolygon(external[:, :2]) if HAS_SHAPELY_VIEWS else None
+
+    # Clip boxes to boundary (polygon-aware, same margin as AdjustGraph)
+    margin = 5
+    clipped_boxes = []
+    for box in fp_end.data.box[:]:
+        x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+        cate = int(box[4]) if len(box) > 4 else 0
+        if cate == 9:  # Balconies can extend outside boundary
+            if x2 <= x1: x2 = x1 + 10
+            if y2 <= y1: y2 = y1 + 10
+        else:
+            x1, y1, x2, y2 = _clip_box_to_polygon(x1, y1, x2, y2, xmin, xmax, ymin, ymax, margin, boundary_shape)
+        clipped_boxes.append([x1, y1, x2, y2, cate])
+
     data_js["rmsize"] = [
-        [[20 * math.sqrt((float(x2) - float(x1)) * (float(y2) - float(y1)) / float(area_))], [mdul.room_label[int(cate)][1]]]
-        for
-        x1, y1, x2, y2, cate in fp_end.data.box[:]]
+        [[20 * math.sqrt((x2 - x1) * (y2 - y1) / float(area_))], [mdul.room_label[int(cate)][1]]]
+        for x1, y1, x2, y2, cate in clipped_boxes]
     # fp_end rmpos
 
     rooms = fp_end.get_rooms(tensor=False)
 
-    center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in fp_end.data.box[:, :4]]
+    center = [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2, _ in clipped_boxes]
 
     # boxes_pred
     data_js["rmpos"] = []
@@ -784,6 +844,7 @@ def AdjustGraph(request):
     external = np.asarray(test_data_item.boundary)
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    boundary_shape = ShapelyPolygon(external[:, :2]) if HAS_SHAPELY_VIEWS else None
 
     # Clip boxes to boundary (except balconies which should extend outside)
     margin = 5
@@ -799,20 +860,11 @@ def AdjustGraph(request):
                 y2 = y1 + 10
             clipped_boxes_end.append([x1, y1, x2, y2])
         else:
-            # Clip to boundary limits
-            x1 = max(xmin + margin, min(x1, xmax - margin))
-            x2 = max(xmin + margin, min(x2, xmax - margin))
-            y1 = max(ymin + margin, min(y1, ymax - margin))
-            y2 = max(ymin + margin, min(y2, ymax - margin))
-            # Ensure x2 > x1 and y2 > y1
-            if x2 <= x1:
-                x2 = x1 + 10
-            if y2 <= y1:
-                y2 = y1 + 10
+            x1, y1, x2, y2 = _clip_box_to_polygon(x1, y1, x2, y2, xmin, xmax, ymin, ymax, margin, boundary_shape)
             clipped_boxes_end.append([x1, y1, x2, y2])
 
     boxes_end = clipped_boxes_end
-    print(f"   → Clipped {len(boxes_end)} boxes to boundary")
+    print(f"   → Clipped {len(boxes_end)} boxes to boundary (polygon-aware)")
 
     # Sort rooms by area (largest first) to ensure proper layering
     # Larger rooms rendered first (behind), smaller rooms last (on top)
@@ -1410,6 +1462,15 @@ def Refine_Floorplan(request):
         # Format door (first two boundary points)
         door = f"{boundary[0][0]},{boundary[0][1]},{boundary[1][0]},{boundary[1][1]}"
 
+        # Build rmpos from refined box centers so the frontend can update node positions
+        rmpos = []
+        for k in range(len(box_out)):
+            box = box_out[k]
+            cx = float((box[0] + box[2]) / 2)
+            cy = float((box[1] + box[3]) / 2)
+            room_label = mdul.room_label[int(room_types[k])][1]
+            rmpos.append([float(k), room_label, cx, cy, float(k)])
+
         # Return results with rendering data
         return JsonResponse({
             "success": True,
@@ -1428,7 +1489,8 @@ def Refine_Floorplan(request):
             # Add rendering data
             "roomret": roomret,
             "exterior": exterior,
-            "door": door
+            "door": door,
+            "rmpos": rmpos
         })
 
     except Exception as e:

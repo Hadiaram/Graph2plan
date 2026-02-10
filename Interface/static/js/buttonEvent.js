@@ -1462,6 +1462,18 @@ function CreateLeftGraph(rooms, roomID) {
                     // Update the display with refined boxes instead of reloading
                     console.log("[Refine Button] Updating floor plan display with refined boxes...");
                     CreateLeftFloorPlan(data.roomret, data.exterior, data.door);
+
+                    // Also move the graph node circles to match refined box centers
+                    if (data.rmpos) {
+                        for (var ri = 0; ri < data.rmpos.length; ri++) {
+                            var rmEntry = data.rmpos[ri];
+                            var nodeId = "TransCircle_" + Math.round(rmEntry[4]) + "_" + rmEntry[1];
+                            d3.select("body").select("#LeftGraphSVG").select("#" + nodeId)
+                                .attr("cx", rmEntry[2])
+                                .attr("cy", rmEntry[3]);
+                        }
+                        console.log("[Refine Button] ✓ Node positions updated to refined box centers.");
+                    }
                     console.log("[Refine Button] ✓ Display updated!");
                 } else {
                     console.error("[Refine Button] Failed:", data.error);

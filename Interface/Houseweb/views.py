@@ -1462,15 +1462,6 @@ def Refine_Floorplan(request):
         # Format door (first two boundary points)
         door = f"{boundary[0][0]},{boundary[0][1]},{boundary[1][0]},{boundary[1][1]}"
 
-        # Build rmpos from refined box centers so the frontend can update node positions
-        rmpos = []
-        for k in range(len(box_out)):
-            box = box_out[k]
-            cx = float((box[0] + box[2]) / 2)
-            cy = float((box[1] + box[3]) / 2)
-            room_label = mdul.room_label[int(room_types[k])][1]
-            rmpos.append([float(k), room_label, cx, cy, float(k)])
-
         # Return results with rendering data
         return JsonResponse({
             "success": True,
@@ -1490,7 +1481,6 @@ def Refine_Floorplan(request):
             "roomret": roomret,
             "exterior": exterior,
             "door": door,
-            "rmpos": rmpos
         })
 
     except Exception as e:

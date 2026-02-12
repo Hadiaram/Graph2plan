@@ -1,0 +1,98 @@
+
+======================================================================
+
+[Python Refinement] Processing floor plan 14926_manual
+  Boxes: 7, Boundary vertices: 10, Threshold: 50.0px
+  Refinement Pass: 1/3
+  *** BOUNDARY VIOLATIONS after INPUT (before any pass) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 266.8, 209.6]
+    Box 1 (Kitchen): [188.8, 173.3, 249.5, 246.4]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 243.9]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 252.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 1: Aligning boxes with boundary...
+
+======================================================================
+
+[Python Refinement] Processing floor plan 14926_manual
+  Boxes: 7, Boundary vertices: 10, Threshold: 50.0px
+  Refinement Pass: 2/3
+  *** BOUNDARY VIOLATIONS after INPUT (before any pass) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Pass 2: Using per-box axis exclusion based on current wall attachments
+  Step 1: Aligning boxes with boundary...
+
+======================================================================
+
+[Python Refinement] Processing floor plan 14926_manual
+  Boxes: 7, Boundary vertices: 10, Threshold: 50.0px
+  Refinement Pass: 3/3
+  *** BOUNDARY VIOLATIONS after INPUT (before any pass) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Pass 3: Skipping wall snapping (will do room-to-room snapping instead)
+  Step 2a: Resolving room overlaps...
+  *** BOUNDARY VIOLATIONS after Step 2a (resolve_room_overlaps) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 2b: Room-to-room snapping (closing gaps)...
+  *** BOUNDARY VIOLATIONS after Step 2b (snap_rooms_to_neighbors) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 3: Filling small boundary gaps...
+  *** BOUNDARY VIOLATIONS after Step 3 (fill_small_boundary_gaps) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 3b: Filling boundary gaps for bathrooms (extended threshold)...
+  *** BOUNDARY VIOLATIONS after Step 3b (fill_small_boundary_gaps bathrooms) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 3.5: Filling inter-room gaps...
+  *** BOUNDARY VIOLATIONS after Step 3.5 (fill_inter_room_gaps) ***
+    Box 0 (LivingRoom): [88.2, 30.2, 251.0, 209.6]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 4: Final processing (TODO - using current boxes)
+  Step 3.5: Expanding living room to fill boundary (Pass 3 complete)...
+  *** BOUNDARY VIOLATIONS after Step 3.5 (expand_living_room_to_boundary) ***
+    Box 0 (LivingRoom): [62.1, 12.8, 256.0, 243.2]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 5: Filling coverage gaps (Shapely)...
+  *** BOUNDARY VIOLATIONS after Step 5 (fill_coverage_gaps) ***
+    Box 0 (LivingRoom): [62.1, 12.8, 256.0, 243.2]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]
+  Step 4: Generating room boundaries (TODO - using simple polygons)
+  *** BOUNDARY VIOLATIONS after FINAL OUTPUT ***
+    Box 0 (LivingRoom): [62.1, 12.8, 256.0, 243.2]
+    Box 2 (MasterRoom): [14.1, 123.4, 127.8, 238.2]
+    Box 3 (MasterRoom): [14.5, 20.5, 111.8, 125.0]
+    Box 4 (Bathroom): [112.2, 199.5, 154.8, 238.2]
+    Box 5 (Bathroom): [11.8, 105.3, 62.1, 163.5]

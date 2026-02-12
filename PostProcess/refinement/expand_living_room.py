@@ -10,6 +10,14 @@ from typing import Tuple, List
 from .geometry_utils import Box, extract_boundary_segments
 
 
+def _get_boundary_pts_lr(boundary: np.ndarray) -> np.ndarray:
+    """Return only the original (non-isNew) boundary vertices as Nx2 array."""
+    if boundary.ndim == 2 and boundary.shape[1] >= 4:
+        mask = (boundary[:, 3] == 0)
+        return boundary[mask, :2]
+    return boundary[:, :2]
+
+
 def expand_living_room_to_boundary(boxes: np.ndarray, 
                                    room_types: np.ndarray,
                                    boundary: np.ndarray,
@@ -49,11 +57,13 @@ def expand_living_room_to_boundary(boxes: np.ndarray,
         print(f"  Living room index: {living_room_idx}")
         print(f"  Original box: {boxes[living_room_idx]}")
     
-    # Get boundary extents
-    boundary_x_min = np.min(boundary[:, 0])
-    boundary_x_max = np.max(boundary[:, 0])
-    boundary_y_min = np.min(boundary[:, 1])
-    boundary_y_max = np.max(boundary[:, 1])
+    # Get boundary extents — use only original (non-isNew) vertices so that
+    # interpolated helper points don't inflate the expansion limits.
+    bnd_pts = _get_boundary_pts_lr(boundary)
+    boundary_x_min = np.min(bnd_pts[:, 0])
+    boundary_x_max = np.max(bnd_pts[:, 0])
+    boundary_y_min = np.min(bnd_pts[:, 1])
+    boundary_y_max = np.max(bnd_pts[:, 1])
     
     if verbose:
         print(f"  Boundary extents: X=[{boundary_x_min:.2f}, {boundary_x_max:.2f}], Y=[{boundary_y_min:.2f}, {boundary_y_max:.2f}]")

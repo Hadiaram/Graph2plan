@@ -527,10 +527,10 @@ def align_box_with_boundary(box: Box, boundary: np.ndarray,
             if verbose:
                 print(f"  ⊙ Skipping {edge_name} edge (already aligned at {alignment.distance:.2f}px)")
             continue
-        
+
         # Calculate coverage score for this movement (used in pass 2)
         coverage = calculate_boundary_coverage(box, edge_name, alignment.snap_value, boundary_extents)
-        
+
         # Selection logic depends on pass
         if refinement_pass == 2:
             # Pass 2: Prefer movements that maximize coverage, but still within reasonable distance
@@ -541,10 +541,10 @@ def align_box_with_boundary(box: Box, boundary: np.ndarray,
                 # Normalize distance to 0-1 range (closer = higher score)
                 distance_score = 1.0 - (alignment.distance / threshold)
                 combined_score = 0.7 * coverage + 0.3 * distance_score
-                
+
                 if verbose:
                     print(f"    {edge_name}: dist={alignment.distance:.2f}px, coverage={coverage:.3f}, score={combined_score:.3f}")
-                
+
                 # Pick the edge with best combined score
                 if combined_score > best_coverage:
                     best_coverage = combined_score

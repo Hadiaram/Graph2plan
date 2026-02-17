@@ -91,20 +91,17 @@ def extract_boundary_segments(boundary: np.ndarray) -> Tuple[List[BoundarySegmen
 
     Args:
         boundary: Nx2 or Nx3+ array of boundary vertices [[x, y], ...]
-                 If Nx4, assumes format [x, y, orientation, isNew]
+                 Extra columns (orientation, isNew, ...) are ignored.
 
     Returns:
         h_segments: List of horizontal boundary segments
         v_segments: List of vertical boundary segments
     """
-    # Handle different boundary formats
-    if boundary.shape[1] >= 4:
-        # Format: [x, y, orientation, isNew, ...]
-        # Filter out "new" vertices if that column exists
-        is_new = boundary[:, 3]
-        boundary_points = boundary[is_new == 0, :2]
-    else:
-        boundary_points = boundary[:, :2]
+    # Always use every vertex regardless of the isNew flag (column 3).
+    # Filtering isNew==1 points drops real structural corners and loses the
+    # wall segments adjacent to them, causing ray_cast_to_walls to return
+    # distance=999999 for directions that are perfectly reachable.
+    boundary_points = boundary[:, :2]
 
     h_segments = []
     v_segments = []

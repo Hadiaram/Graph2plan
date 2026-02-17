@@ -40,6 +40,8 @@ urlpatterns = [
     path('index/Save_Editbox/', views.Save_Editbox),
     path('index/Refine_Floorplan/', views.Refine_Floorplan),  # Manual refinement button
     path('index/Export_DXF/', views.Export_DXF),  # Manual DXF export button
+    path('index/Log_Boundaries/', views.Log_Boundaries),  # Boundary diagnostic button
+    path('index/Download_Logs/', views.Download_Logs),   # Download last refinement log
 
     path('home', views.home),
 

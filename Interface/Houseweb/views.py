@@ -2,6 +2,7 @@ from django.shortcuts import render # type: ignore
 from django.http import HttpResponse, JsonResponse # type: ignore
 from django.conf import settings # type: ignore
 import json
+import io
 import os
 import random
 import model.test as mltest
@@ -55,6 +56,34 @@ try:
 except ImportError as e:
     print(f"[Init] Python refinement not available: {e}")
     warnings.warn("Python refinement not available. Will use MATLAB or basic fallback.", UserWarning)
+
+# ---------------------------------------------------------------------------
+# Log capture helpers
+# ---------------------------------------------------------------------------
+
+class _TeeBuffer:
+    """Write to both a StringIO buffer and the original stdout simultaneously."""
+    def __init__(self, real_stdout):
+        self._buf = io.StringIO()
+        self._real = real_stdout
+
+    def write(self, data):
+        self._buf.write(data)
+        self._real.write(data)
+
+    def flush(self):
+        self._buf.flush()
+        self._real.flush()
+
+    def getvalue(self):
+        return self._buf.getvalue()
+
+
+# Accumulates logs across all refinement passes so the full session can be
+# downloaded. Resets automatically when the pass cycle restarts at Pass 1.
+_last_refinement_log: dict = {"userRoomID": None, "text": ""}
+
+# ---------------------------------------------------------------------------
 
 global test_data, test_data_topk, testNameList, trainNameList
 global train_data, trainTF, train_data_eNum, train_data_rNum
@@ -1300,6 +1329,11 @@ def Refine_Floorplan(request):
             "error": "userRoomID parameter required"
         }, status=400)
 
+    # Capture all print() output so it can be downloaded from the interface.
+    _tee = _TeeBuffer(sys.stdout)
+    _old_stdout = sys.stdout
+    sys.stdout = _tee
+
     try:
         # Load the saved floor plan data
         # userRoomID should be the base name (e.g., "14926"), so we need to add .mat extension
@@ -1328,8 +1362,8 @@ def Refine_Floorplan(request):
         else:
             current_pass = 1
 
-        # If we're on pass 4, reset to 1 (cycle back after completing 3 passes)
-        if current_pass > 3:
+        # Clamp to valid range (1–7); anything out of range restarts at 1
+        if current_pass > 7 or current_pass < 1:
             current_pass = 1
 
         # CRITICAL: On Pass 2 or 3, use the refined boxes from previous passes, not the original boxes!
@@ -1341,7 +1375,7 @@ def Refine_Floorplan(request):
 
         print(f"\n[Manual Refine] Processing {userRoomID}")
         print(f"  Boxes: {len(boxes)}, Threshold: {threshold}px, Force method: {force_method}")
-        print(f"  Refinement Pass: {current_pass}/3")
+        print(f"  Refinement Pass: {current_pass}/7")
         print(f"  Expand Living Room: {expand_living}")
 
         # Run refinement based on method preference
@@ -1438,12 +1472,15 @@ def Refine_Floorplan(request):
 
         # NEW: Store the NEXT pass number for the next refinement call
         # Store at top level to avoid structured array field issues
-        next_pass = current_pass + 1 if current_pass < 3 else 1
+        # Pass sequence: 1 → 2 → 3 → 4 → 5 → 1
+        # Pass 4: bathroom wall anchor (after bathroom snaps to LR in Pass 3)
+        # Pass 5: living room expansion + coverage gap fill
+        next_pass = current_pass + 1 if current_pass < 7 else 1
         data['refinement_pass'] = np.array([[next_pass]])
 
         # Save back to disk
         sio.savemat(mat_path, data)
-        print(f"[Manual Refine] ✓ Saved refined floor plan to disk (next pass will be {next_pass}/3)")
+        print(f"[Manual Refine] ✓ Saved refined floor plan to disk (next pass will be {next_pass}/7)")
 
         # Format data for frontend rendering (same format as AdjustGraph response)
         roomret = []
@@ -1486,10 +1523,39 @@ def Refine_Floorplan(request):
     except Exception as e:
         import traceback
         traceback.print_exc()
+        sys.stdout = _old_stdout
+        if current_pass == 1 or _last_refinement_log["userRoomID"] != userRoomID:
+            _last_refinement_log["text"] = ""
+        _last_refinement_log["userRoomID"] = userRoomID
+        _last_refinement_log["text"] += _tee.getvalue()
         return JsonResponse({
             "success": False,
             "error": str(e)
         }, status=500)
+
+    finally:
+        # Restore stdout and accumulate the captured log.
+        # Reset when starting a new cycle (Pass 1) or a different floor plan.
+        sys.stdout = _old_stdout
+        if current_pass == 1 or _last_refinement_log["userRoomID"] != userRoomID:
+            _last_refinement_log["text"] = ""
+        _last_refinement_log["userRoomID"] = userRoomID
+        _last_refinement_log["text"] += _tee.getvalue()
+
+
+def Download_Logs(request):
+    """
+    Serve the log from the most recent refinement call as a plain-text download.
+    """
+    import datetime
+    log_text = _last_refinement_log.get("text") or "No refinement log yet."
+    room_id = _last_refinement_log.get("userRoomID") or "unknown"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"refinement_log_{room_id}_{timestamp}.txt"
+
+    response = HttpResponse(log_text, content_type="text/plain; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 def TransGraph_net(request):
@@ -2071,6 +2137,204 @@ def Export_DXF(request):
             "error": str(e),
             "traceback": traceback.format_exc()
         }, status=500)
+
+
+def Log_Boundaries(request):
+    """
+    Boundary diagnostic endpoint - triggered by the Log Boundaries button.
+
+    Logs all boundary point coordinates and checks each room box's position
+    relative to the boundary polygon (extents check + Shapely escape area).
+
+    GET parameters:
+        - userRoomID: Floor plan identifier (e.g., "14926")
+
+    Returns:
+        JSON with boundary_points list and per-room relationship info.
+        Full detail is also printed to the server console.
+    """
+    userRoomID = request.GET.get("userRoomID")
+    if not userRoomID:
+        return JsonResponse({"success": False, "error": "userRoomID parameter required"}, status=400)
+
+    try:
+        mat_path = f"./static/{userRoomID}.mat"
+        if not os.path.exists(mat_path):
+            return JsonResponse({"success": False,
+                                 "error": f"Floor plan {userRoomID}.mat not found in static directory"}, status=404)
+
+        print(f"\n[Log Boundaries] {'='*60}")
+        print(f"[Log Boundaries] Floor plan: {userRoomID}")
+        data = sio.loadmat(mat_path)
+        fp_data = data['data'][0, 0]
+        available_fields = fp_data.dtype.names
+        print(f"[Log Boundaries] Available fields: {available_fields}")
+
+        # --- Load boundary ---
+        if 'boundary' not in available_fields:
+            return JsonResponse({"success": False, "error": "No 'boundary' field in .mat file"})
+        boundary = np.array(fp_data['boundary'])
+        print(f"[Log Boundaries] Boundary shape: {boundary.shape}")
+
+        # --- Load boxes and room types ---
+        box_field = 'refineBox' if 'refineBox' in available_fields else 'gtBox'
+        boxes_raw = np.array(fp_data[box_field]) if box_field in available_fields else None
+        rtype_raw = np.array(fp_data['rType']).flatten() if 'rType' in available_fields else None
+
+        room_type_names = {0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen",
+                           3: "Bathroom", 15: "FrontDoor"}
+        direction_names  = {0: "right →", 1: "up ↑", 2: "left ←", 3: "down ↓"}
+
+        # --- Parse boundary points ---
+        coords = boundary[:, :2]
+        boundary_points = []
+        for idx in range(len(boundary)):
+            pt = {"index": idx,
+                  "x": round(float(coords[idx, 0]), 2),
+                  "y": round(float(coords[idx, 1]), 2)}
+            if boundary.shape[1] >= 3:
+                d = int(boundary[idx, 2])
+                pt["direction_code"] = d
+                pt["direction"] = direction_names.get(d, str(d))
+            if boundary.shape[1] >= 4:
+                pt["is_new"] = int(boundary[idx, 3])
+            boundary_points.append(pt)
+            print(f"[Log Boundaries]   pt[{idx:2d}]  x={pt['x']:7.2f}  y={pt['y']:7.2f}"
+                  + (f"  dir={pt['direction']}" if "direction" in pt else "")
+                  + (f"  isNew={pt['is_new']}"  if "is_new"   in pt else ""))
+
+        bnd_min_x = float(np.min(coords[:, 0]))
+        bnd_max_x = float(np.max(coords[:, 0]))
+        bnd_min_y = float(np.min(coords[:, 1]))
+        bnd_max_y = float(np.max(coords[:, 1]))
+        print(f"[Log Boundaries] Extents: x=[{bnd_min_x:.2f}, {bnd_max_x:.2f}]  "
+              f"y=[{bnd_min_y:.2f}, {bnd_max_y:.2f}]")
+
+        # --- Wall segments (point[i] → point[i+1]) ---
+        n_pts = len(coords)
+        wall_segments = []
+        print(f"\n[Log Boundaries] Wall segments ({n_pts}):")
+        for idx in range(n_pts):
+            next_idx = (idx + 1) % n_pts
+            x1w, y1w = float(coords[idx,      0]), float(coords[idx,      1])
+            x2w, y2w = float(coords[next_idx, 0]), float(coords[next_idx, 1])
+            length = round(float(np.sqrt((x2w - x1w)**2 + (y2w - y1w)**2)), 2)
+            wall = {"index": idx,
+                    "x1": round(x1w, 2), "y1": round(y1w, 2),
+                    "x2": round(x2w, 2), "y2": round(y2w, 2),
+                    "length": length}
+            if boundary.shape[1] >= 3:
+                d = int(boundary[idx, 2])
+                wall["direction_code"] = d
+                wall["direction"] = direction_names.get(d, str(d))
+            wall_segments.append(wall)
+            print(f"[Log Boundaries]   wall[{idx:2d}]  "
+                  f"({x1w:.2f},{y1w:.2f}) → ({x2w:.2f},{y2w:.2f})  "
+                  f"len={length:.2f}"
+                  + (f"  dir={wall['direction']}" if "direction" in wall else ""))
+
+        # --- Shapely polygon (optional, for escape area) ---
+        bnd_poly = None
+        has_shapely = False
+        try:
+            from shapely.geometry import Polygon as ShapelyPolygon
+            from shapely.geometry import box as shapely_box
+            bnd_poly = ShapelyPolygon(coords.tolist())
+            if not bnd_poly.is_valid:
+                bnd_poly = bnd_poly.buffer(0)
+            has_shapely = True
+        except ImportError:
+            pass
+
+        # --- Parse rooms ---
+        rooms = []
+        if boxes_raw is not None and rtype_raw is not None:
+            print(f"\n[Log Boundaries] Rooms ({len(boxes_raw)}):")
+            for i in range(len(boxes_raw)):
+                row = boxes_raw[i]
+                x1, y1, x2, y2 = float(row[0]), float(row[1]), float(row[2]), float(row[3])
+                rtype = int(rtype_raw[i]) if i < len(rtype_raw) else -1
+                rname = room_type_names.get(rtype, f"Unknown({rtype})")
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+                # Nearest boundary point
+                dists      = np.sqrt((coords[:, 0] - cx)**2 + (coords[:, 1] - cy)**2)
+                nearest_idx  = int(np.argmin(dists))
+                nearest_dist = round(float(dists[nearest_idx]), 2)
+
+                # Closest wall segment (point-to-segment distance from room center)
+                min_wall_dist = float('inf')
+                closest_wall_idx = 0
+                for w in wall_segments:
+                    wx1, wy1, wx2, wy2 = w['x1'], w['y1'], w['x2'], w['y2']
+                    dx, dy = wx2 - wx1, wy2 - wy1
+                    seg_len_sq = dx * dx + dy * dy
+                    if seg_len_sq == 0:
+                        wdist = float(np.sqrt((cx - wx1) ** 2 + (cy - wy1) ** 2))
+                    else:
+                        t = max(0.0, min(1.0, ((cx - wx1) * dx + (cy - wy1) * dy) / seg_len_sq))
+                        proj_x = wx1 + t * dx
+                        proj_y = wy1 + t * dy
+                        wdist = float(np.sqrt((cx - proj_x) ** 2 + (cy - proj_y) ** 2))
+                    if wdist < min_wall_dist:
+                        min_wall_dist = wdist
+                        closest_wall_idx = w['index']
+                closest_wall = wall_segments[closest_wall_idx]
+                closest_wall_name = f"Wall[{closest_wall_idx}]"
+                if 'direction' in closest_wall:
+                    closest_wall_name += f" {closest_wall['direction']}"
+                closest_wall_dist = round(min_wall_dist, 2)
+
+                room_info = {
+                    "index": i, "type": rtype, "type_name": rname,
+                    "x1": round(x1, 2), "y1": round(y1, 2),
+                    "x2": round(x2, 2), "y2": round(y2, 2),
+                    "center_x": round(cx, 2), "center_y": round(cy, 2),
+                    "nearest_boundary_point_idx":  nearest_idx,
+                    "nearest_boundary_point_dist": nearest_dist,
+                    "closest_wall_idx":  closest_wall_idx,
+                    "closest_wall_name": closest_wall_name,
+                    "closest_wall_dist": closest_wall_dist,
+                    "inside_boundary_extents": (x1 >= bnd_min_x and x2 <= bnd_max_x and
+                                                y1 >= bnd_min_y and y2 <= bnd_max_y),
+                }
+
+                if has_shapely:
+                    room_poly  = shapely_box(x1, y1, x2, y2)
+                    outside    = room_poly.difference(bnd_poly)
+                    escape_area = round(float(outside.area), 2) if not outside.is_empty else 0.0
+                    room_info["escape_area_px2"]      = escape_area
+                    room_info["fully_inside_boundary"] = escape_area < 0.01
+
+                rooms.append(room_info)
+                print(f"[Log Boundaries]   [{i}] {rname:12s} "
+                      f"({x1:.1f},{y1:.1f})-({x2:.1f},{y2:.1f})  "
+                      f"nearest_bnd={nearest_idx} dist={nearest_dist:.2f}  "
+                      f"closest_wall={closest_wall_name} wall_dist={closest_wall_dist:.2f}"
+                      + (f"  escape={room_info['escape_area_px2']:.2f}px²" if has_shapely else "")
+                      + ("  ⚠ OUTSIDE extents" if not room_info["inside_boundary_extents"] else ""))
+
+        print(f"[Log Boundaries] {'='*60}\n")
+
+        return JsonResponse({
+            "success": True,
+            "floor_plan_id": userRoomID,
+            "boundary_point_count": len(boundary_points),
+            "boundary_extents": {
+                "x_min": round(bnd_min_x, 2), "x_max": round(bnd_max_x, 2),
+                "y_min": round(bnd_min_y, 2), "y_max": round(bnd_max_y, 2),
+            },
+            "boundary_points": boundary_points,
+            "wall_segments": wall_segments,
+            "room_count": len(rooms),
+            "rooms": rooms,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"success": False, "error": str(e),
+                             "traceback": traceback.format_exc()}, status=500)
 
 
 if __name__ == "__main__":

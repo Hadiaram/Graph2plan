@@ -794,6 +794,146 @@
                         <svg id="LeftLayoutSVG" width="256" height="256" viewBox="-30 -30 316 316"
                              style="z-index: 9;margin-left: 128px;margin-top: 128px;position: absolute;"></svg>
 
+                        <!-- Measurement overlay - covers the full leftbox area -->
+                        <svg id="measureSVG" width="516" height="516"
+                             style="position:absolute;top:0;left:0;z-index:1001;pointer-events:none;display:none;cursor:crosshair;">
+                            <line id="measureLine" stroke="#FF4444" stroke-width="2" stroke-dasharray="5,3"
+                                  x1="0" y1="0" x2="0" y2="0" style="display:none;"/>
+                            <circle id="measureDot1" r="5" fill="#FF4444" cx="0" cy="0" style="display:none;"/>
+                            <circle id="measureDot2" r="5" fill="#FF4444" cx="0" cy="0" style="display:none;"/>
+                            <text id="measureLabel" fill="#FF4444" font-size="13" font-weight="bold"
+                                  text-anchor="middle" x="0" y="0"
+                                  style="display:none;paint-order:stroke;stroke:#fff;stroke-width:3;stroke-linejoin:round;"></text>
+                        </svg>
+
+                        <script>
+                        (function() {
+                            var _measureActive = false;
+                            var _measurePt1 = null;
+
+                            window.toggleMeasureMode = function() {
+                                _measureActive = !_measureActive;
+                                var btn = document.getElementById('measureButton');
+                                var svg = document.getElementById('measureSVG');
+                                if (_measureActive) {
+                                    btn.style.backgroundColor = '#D32F2F';
+                                    btn.textContent = '\uD83D\uDCCF Measuring';
+                                    svg.style.display = 'block';
+                                    svg.style.pointerEvents = 'all';
+                                    _measurePt1 = null;
+                                    clearDots();
+                                } else {
+                                    btn.style.backgroundColor = '#795548';
+                                    btn.textContent = '\uD83D\uDCCF Measure';
+                                    svg.style.display = 'none';
+                                    svg.style.pointerEvents = 'none';
+                                    _measurePt1 = null;
+                                    clearDots();
+                                }
+                            };
+
+                            function clearDots() {
+                                ['measureLine','measureDot1','measureDot2','measureLabel'].forEach(function(id){
+                                    var el = document.getElementById(id);
+                                    if (el) el.style.display = 'none';
+                                });
+                            }
+
+                            document.getElementById('measureSVG').addEventListener('click', function(e) {
+                                if (!_measureActive) return;
+                                var rect = this.getBoundingClientRect();
+                                var x = e.clientX - rect.left;
+                                var y = e.clientY - rect.top;
+                                if (_measurePt1 === null) {
+                                    _measurePt1 = {x: x, y: y};
+                                    var d1 = document.getElementById('measureDot1');
+                                    d1.setAttribute('cx', x); d1.setAttribute('cy', y);
+                                    d1.style.display = 'block';
+                                    document.getElementById('measureLine').style.display = 'none';
+                                    document.getElementById('measureDot2').style.display = 'none';
+                                    document.getElementById('measureLabel').style.display = 'none';
+                                } else {
+                                    var dx = x - _measurePt1.x, dy = y - _measurePt1.y;
+                                    var dist = Math.sqrt(dx*dx + dy*dy);
+                                    var ln = document.getElementById('measureLine');
+                                    ln.setAttribute('x1', _measurePt1.x); ln.setAttribute('y1', _measurePt1.y);
+                                    ln.setAttribute('x2', x);             ln.setAttribute('y2', y);
+                                    ln.style.display = 'block';
+                                    var d2 = document.getElementById('measureDot2');
+                                    d2.setAttribute('cx', x); d2.setAttribute('cy', y);
+                                    d2.style.display = 'block';
+                                    var lbl = document.getElementById('measureLabel');
+                                    lbl.setAttribute('x', (_measurePt1.x + x) / 2);
+                                    lbl.setAttribute('y', (_measurePt1.y + y) / 2 - 10);
+                                    lbl.textContent = dist.toFixed(1) + 'px';
+                                    lbl.style.display = 'block';
+                                    _measurePt1 = null;
+                                }
+                            });
+                        })();
+                        </script>
+
+                        <!-- Left panel delete mode (event delegation — no function wrapping needed) -->
+                        <script>
+                        (function() {
+                            window.leftDeleteMode = false;
+
+                            window.toggleLeftDeleteMode = function() {
+                                window.leftDeleteMode = !window.leftDeleteMode;
+                                var btn = document.getElementById('leftDeleteMode');
+                                var box = document.getElementById('leftbox');
+                                var layoutSVG = document.getElementById('LeftLayoutSVG');
+                                if (window.leftDeleteMode) {
+                                    btn.style.backgroundColor = '#43a047';
+                                    btn.textContent = 'Delete Mode: ON';
+                                    box.style.border = '3px solid #e53935';
+                                    // Raise LeftLayoutSVG above LeftGraphSVG (z-index 999)
+                                    // so clicks land on the room rects, not the graph layer.
+                                    layoutSVG.style.zIndex = '1000';
+                                } else {
+                                    btn.style.backgroundColor = '#e53935';
+                                    btn.textContent = 'Delete Mode: OFF';
+                                    box.style.border = '2px solid #d2d2d2';
+                                    layoutSVG.style.zIndex = '9';
+                                }
+                            };
+
+                            // Event delegation on #LeftLayoutSVG.
+                            // When delete mode is ON the SVG is the topmost layer (z-index 1000),
+                            // so clicks reach it directly and these listeners fire.
+                            var svg = document.getElementById('LeftLayoutSVG');
+
+                            svg.addEventListener('click', function(e) {
+                                if (!window.leftDeleteMode) return;
+                                if (e.target.tagName.toLowerCase() !== 'rect') return;
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                                var rect = e.target;
+                                rect.style.transition = 'opacity 0.3s';
+                                rect.style.opacity = '0';
+                                setTimeout(function() {
+                                    if (rect.parentNode) rect.parentNode.removeChild(rect);
+                                }, 300);
+                            }, true);
+
+                            svg.addEventListener('mouseover', function(e) {
+                                if (!window.leftDeleteMode) return;
+                                if (e.target.tagName.toLowerCase() === 'rect') {
+                                    e.target.setAttribute('stroke', '#e53935');
+                                    e.target.setAttribute('stroke-width', '5');
+                                }
+                            }, true);
+
+                            svg.addEventListener('mouseout', function(e) {
+                                if (!window.leftDeleteMode) return;
+                                if (e.target.tagName.toLowerCase() === 'rect') {
+                                    e.target.setAttribute('stroke', '#000');
+                                    e.target.setAttribute('stroke-width', '4');
+                                }
+                            }, true);
+                        })();
+                        </script>
+
                     </div><!--/span-->
                     <style type="text/css"></style>
                     <div id="listbox" class="listbox"
@@ -828,6 +968,21 @@
                         </div>
                     </a>
                 </div>
+                <div id="downloadLogsButton"
+                     onclick="window.location.href='/index/Download_Logs/'"
+                     style="cursor: pointer;background-color: #546E7A;color: #fff;width: 110px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 0px;margin-top: 40px;">
+                    📋 Export Logs
+                </div>
+                <div id="measureButton"
+                     onclick="toggleMeasureMode()"
+                     style="cursor: pointer;background-color: #795548;color: #fff;width: 90px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 120px;margin-top: 40px;">
+                    📏 Measure
+                </div>
+                <div id="leftDeleteMode"
+                     onclick="toggleLeftDeleteMode()"
+                     style="cursor: pointer;background-color: #e53935;color: #fff;width: 120px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 220px;margin-top: 40px;">
+                    Delete Mode: OFF
+                </div>
                 <div id="Generate"
                      style="cursor: pointer;background-color: #699cbb;color: #fff;width: 90px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 80px;">
                     Generate
@@ -855,6 +1010,14 @@
                 <div id="exportDXFButton"
                      style="cursor: pointer;background-color: #2196F3;color: #fff;width: 100px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 570px;display: none;">
                     📐 Export DXF
+                </div>
+                <div id="logBoundariesButton"
+                     style="cursor: pointer;background-color: #00897B;color: #fff;width: 120px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 680px;display: none;">
+                    🔍 Log Boundary
+                </div>
+                <div id="showOutsideButton"
+                     style="cursor: pointer;background-color: #6A1B9A;color: #fff;width: 120px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 810px;display: none;">
+                    👁 Show Outside
                 </div>
                 <div id="transfer"
                      style="cursor: pointer;background-color: #0072cb;color: #fff;width: 90px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left:972px;">

@@ -6,7 +6,7 @@ This module provides a drop-in replacement for MATLAB's align_fp function.
 
 import numpy as np
 from typing import Tuple, List, Union
-from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, snap_bathroom_to_nearest_clear_wall, close_small_gaps, snap_rooms_to_fill_gaps, fill_small_boundary_gaps, fill_inter_room_gaps, resolve_room_overlaps, fill_coverage_gaps
+from .boundary_align import align_all_boxes_with_boundary, snap_rooms_to_neighbors, snap_bathroom_to_nearest_clear_wall, close_small_gaps, snap_rooms_to_fill_gaps, fill_small_boundary_gaps, fill_inter_room_gaps, resolve_room_overlaps, fill_coverage_gaps, enforce_graph_adjacency
 from .expand_living_room import expand_living_room_to_boundary
 
 
@@ -62,6 +62,10 @@ def align_fp_python(boundary: np.ndarray,
     print(f"\n[Python Refinement] Processing floor plan {fp_id}")
     print(f"  Boxes: {len(boxes)}, Boundary vertices: {len(boundary)}, Threshold: {threshold}px")
     print(f"  Refinement Pass: {refinement_pass}/5")
+
+    # Snapshot of boxes at function entry — used to detect movement
+    # across all steps within this pass for graph-adjacency enforcement.
+    _boxes_at_entry = boxes.copy()
 
     # ============================================================
     # STEP 1: BOUNDARY ALIGNMENT ✅
@@ -433,6 +437,22 @@ def align_fp_python(boundary: np.ndarray,
             room_types,
             boundary,
             gap_threshold=20.0,
+            verbose=True
+        )
+
+    # ============================================================
+    # GRAPH ADJACENCY ENFORCEMENT
+    # Hard constraint: if two graph-connected rooms were adjacent at pass
+    # entry and are now separated, the smaller room follows the bigger one
+    # (translated by the same centroid delta).  Runs after every pass.
+    # ============================================================
+    if edges is not None and len(edges) > 0:
+        print("  [graph-adj] Enforcing graph adjacency (smaller rooms follow larger)...")
+        final_boxes = enforce_graph_adjacency(
+            _boxes_at_entry,
+            final_boxes,
+            edges,
+            room_types,
             verbose=True
         )
 

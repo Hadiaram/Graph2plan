@@ -2057,6 +2057,147 @@ def snap_rooms_to_fill_gaps(
     return result
 
 
+def enforce_graph_adjacency(
+        boxes_before: np.ndarray,
+        boxes_after: np.ndarray,
+        edges: np.ndarray,
+        room_types: np.ndarray,
+        touch_tol_before: float = 15.0,
+        touch_tol_after: float = 3.0,
+        verbose: bool = False) -> np.ndarray:
+    """
+    After any refinement pass, ensure graph-connected room pairs remain adjacent.
+
+    For each edge (i, j): if the two rooms were close before the pass (within
+    touch_tol_before) but are now separated (gap > touch_tol_after), the smaller
+    room is face-snapped to the bigger room's new position.  The adjacency
+    direction (which face of the bigger room the smaller room touches) is
+    determined from the pre-pass state, then the smaller room is translated
+    so that exact face-to-face contact is restored.
+
+    Args:
+        boxes_before:       Nx4 boxes at pass entry
+        boxes_after:        Nx4 boxes at pass exit (will be modified)
+        edges:              Graph adjacency array, shape (K, 2) or (K, 3)
+        room_types:         N-length room type array
+        touch_tol_before:   Proximity threshold for "were they adjacent?" (px)
+        touch_tol_after:    Proximity threshold for "still adjacent?" (px)
+        verbose:            Print debug info
+
+    Returns:
+        Updated Nx4 box array with co-movement applied.
+    """
+    if edges is None or len(edges) == 0:
+        return boxes_after.copy()
+
+    result = boxes_after.copy()
+    n = len(boxes_before)
+
+    room_type_names = {
+        0: "LivingRoom", 1: "MasterRoom", 2: "Kitchen", 3: "Bathroom",
+        4: "DiningRoom", 5: "ChildRoom", 6: "StudyRoom", 7: "SecondRoom",
+        8: "GuestRoom", 9: "Balcony", 10: "Entrance", 11: "Storage", 12: "Wall",
+    }
+
+    def _rname(t: int) -> str:
+        return room_type_names.get(int(t), f"type{t}")
+
+    def _is_close(a: np.ndarray, b: np.ndarray, tol: float) -> bool:
+        """Return True if boxes are touching, overlapping, or within tol px."""
+        h_ov = min(a[2], b[2]) - max(a[0], b[0])
+        v_ov = min(a[3], b[3]) - max(a[1], b[1])
+        if h_ov > 0 and v_ov > 0:
+            return True  # overlapping
+        if (abs(a[0] - b[2]) <= tol or abs(a[2] - b[0]) <= tol) and v_ov > 0:
+            return True  # vertical face
+        if (abs(a[1] - b[3]) <= tol or abs(a[3] - b[1]) <= tol) and h_ov > 0:
+            return True  # horizontal face
+        return False
+
+    def _adj_direction(small: np.ndarray, big: np.ndarray, tol: float) -> str:
+        """
+        Determine which face of 'big' the 'small' box was adjacent to before
+        the pass.  Returns 'left', 'right', 'top', or 'bottom' (the face of
+        'big' that 'small' was touching/nearest to).
+        """
+        if abs(small[2] - big[0]) <= tol:  return 'left'    # small.x2 ≈ big.x1
+        if abs(small[0] - big[2]) <= tol:  return 'right'   # small.x1 ≈ big.x2
+        if abs(small[3] - big[1]) <= tol:  return 'top'     # small.y2 ≈ big.y1
+        if abs(small[1] - big[3]) <= tol:  return 'bottom'  # small.y1 ≈ big.y2
+        # Overlapping — fall back to centroid direction
+        cx_s = (small[0] + small[2]) / 2.0
+        cy_s = (small[1] + small[3]) / 2.0
+        cx_b = (big[0] + big[2]) / 2.0
+        cy_b = (big[1] + big[3]) / 2.0
+        dx, dy = cx_b - cx_s, cy_b - cy_s
+        if abs(dx) >= abs(dy):
+            return 'right' if dx > 0 else 'left'
+        return 'bottom' if dy > 0 else 'top'
+
+    def _snap_to_face(small: np.ndarray, big: np.ndarray, face: str) -> np.ndarray:
+        """
+        Translate 'small' so it touches 'big' on the given face.
+        'face' is the face of 'big' that 'small' should be pressed against.
+        """
+        s = small.copy()
+        if face == 'left':      # small's right edge → big's left edge
+            dx = big[0] - s[2]
+            return np.array([s[0]+dx, s[1], s[2]+dx, s[3]])
+        elif face == 'right':   # small's left edge → big's right edge
+            dx = big[2] - s[0]
+            return np.array([s[0]+dx, s[1], s[2]+dx, s[3]])
+        elif face == 'top':     # small's bottom edge → big's top edge
+            dy = big[1] - s[3]
+            return np.array([s[0], s[1]+dy, s[2], s[3]+dy])
+        else:                   # 'bottom': small's top edge → big's bottom edge
+            dy = big[3] - s[1]
+            return np.array([s[0], s[1]+dy, s[2], s[3]+dy])
+
+    def _area(box: np.ndarray) -> float:
+        return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
+
+    if verbose:
+        print(f"\n  [enforce_graph_adjacency] Checking {len(edges)} graph edges...")
+
+    for edge in edges:
+        ei, ej = int(edge[0]), int(edge[1])
+        if not (0 <= ei < n and 0 <= ej < n):
+            continue
+
+        # Were they adjacent (or close) before the pass?
+        if not _is_close(boxes_before[ei], boxes_before[ej], touch_tol_before):
+            continue  # Not adjacent before — nothing to enforce
+
+        # Are they still adjacent after the pass?
+        if _is_close(result[ei], result[ej], touch_tol_after):
+            continue  # Still adjacent — all good
+
+        # Separated — determine which is smaller (mover) and bigger (anchor)
+        area_i = _area(boxes_before[ei])
+        area_j = _area(boxes_before[ej])
+        if area_i <= area_j:
+            smaller_idx, bigger_idx = ei, ej
+        else:
+            smaller_idx, bigger_idx = ej, ei
+
+        # Determine which face of the bigger room the smaller room was against
+        face = _adj_direction(boxes_before[smaller_idx], boxes_before[bigger_idx],
+                              tol=touch_tol_before)
+
+        # Snap the smaller room's face directly to the bigger room's new position
+        new_small = _snap_to_face(result[smaller_idx], result[bigger_idx], face)
+        result[smaller_idx] = new_small
+
+        if verbose:
+            print(f"  [enforce_graph_adjacency] Edge ({ei},{ej}): "
+                  f"{_rname(room_types[smaller_idx])} {smaller_idx} snapped to "
+                  f"{face!r} face of {_rname(room_types[bigger_idx])} {bigger_idx} "
+                  f"→ ({new_small[0]:.1f},{new_small[1]:.1f},"
+                  f"{new_small[2]:.1f},{new_small[3]:.1f})")
+
+    return result
+
+
 def close_small_gaps(
         boxes: np.ndarray,
         room_types: np.ndarray,

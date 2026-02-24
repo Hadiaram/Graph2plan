@@ -30,10 +30,13 @@ global train_data, trainTF, train_data_eNum, train_data_rNum
 global engview, model
 global tf_train, centroids, clusters
 global boxes_pred, indxlist
+global last_fp_data, last_testname
 
 # Initialize module-level variables
 boxes_pred = None
 indxlist = None
+last_fp_data = None
+last_testname = None
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -852,6 +855,11 @@ def AdjustGraph(request):
     
     fp_end.data = add_dw_fp(fp_end.data)
 
+    # Store for OptimizeLayout endpoint
+    global last_fp_data, last_testname
+    last_fp_data = fp_end.data
+    last_testname = testname
+
     # Populate indoor with room boundary polygons (rBoundary)
     # This makes the Layout view match the thumbnail images
     data_js["indoor"] = []
@@ -919,6 +927,98 @@ def AdjustGraph(request):
     print(f"   → rmsize: {len(data_js.get('rmsize', []))} room sizes")
     print(f"   → rmpos: {len(data_js.get('rmpos', []))} room positions")
     print("="*80 + "\n")
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
+def OptimizeLayout(request):
+    global last_fp_data, last_testname
+
+    if last_fp_data is None:
+        return HttpResponse(
+            json.dumps({'error': 'No layout generated yet. Click Generate first.'}),
+            content_type="application/json",
+            status=400,
+        )
+
+    # Import solver (lives in PostProcess/optimizer/)
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import optimize_layout, boxes_to_boundaries
+
+    print("[OPTIMIZER] Running CP-SAT on current layout...")
+    opt_boxes, opt_status = optimize_layout(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.rEdge,
+        boundary=last_fp_data.boundary,
+        timeout=5.0,
+    )
+    print(f"[OPTIMIZER] Status: {opt_status}")
+
+    last_fp_data.newBox    = opt_boxes
+    last_fp_data.rBoundary = boxes_to_boundaries(opt_boxes)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    # Build response in the same format as AdjustGraph
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    # Rooms sorted by area (largest first, same as AdjustGraph)
+    K = len(opt_boxes)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in opt_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    # Exterior boundary string
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    # Room boundary polygons
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    # Edges
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    # Windows
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    # Save updated layout
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    print(f"[OPTIMIZER] Done — returning optimized layout.")
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 

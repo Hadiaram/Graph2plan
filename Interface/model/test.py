@@ -355,7 +355,7 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     fp_end.data.newBox = np.array(box_out)
     fp_end.data.order = np.array(box_order)
     fp_end.data.rBoundary = [np.array(rb) for rb in rBoundary]
-    
+
     print(f"\n   ✅ [TEST] get_userinfo_adjust() completed successfully")
     print(f"      → Returning: (fp_end, box_out, box_order, gene_layout, boxes_refeine)")
     print(f"{'='*80}\n")

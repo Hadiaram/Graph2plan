@@ -4,6 +4,7 @@ from g2p.retrieval import DataRetriever
 from g2p.floorplan import FloorPlan
 from g2p.align import align_fp_refine
 from g2p.add_archs import add_door_window
+from optimizer.solver import optimize_layout, boxes_to_boundaries
 
 import numpy as np
 import pickle
@@ -104,16 +105,30 @@ class App():
 
         return data
 
+    def optimize(self, data, timeout=5.0):
+        optimized_boxes, status = optimize_layout(
+            data.newBox,
+            data.rType,
+            data.rEdge,
+            boundary=data.boundary,
+            timeout=timeout,
+        )
+        print(f"[optimizer] CP-SAT status: {status}")
+        data.newBox    = optimized_boxes
+        data.rBoundary = boxes_to_boundaries(optimized_boxes)
+        return data
+
     def decorate(self,data):
         doors,windows = add_door_window(data)
         data.doors = doors
         data.windows = windows
         return data
-    
+
     def generate(self,data_boundary):
         data = self.retrieve(data_boundary)[0]
         data = self.transfer(data_boundary,data)
         data = self.forward(data)
         data = self.align(data)
+        data = self.optimize(data)
         data = self.decorate(data)
         return data

@@ -1219,6 +1219,7 @@ function CreateLeftGraph(rooms, roomID) {
                 console.log("🎨 [FRONTEND] Rendering with CreateLeftPlan...");
                 CreateLeftPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret["door"], adjust_ret["windows"], adjust_ret["indoor"], adjust_ret["windowsline"]);
                 d3.select('body').select('#LeftGraphSVG').selectAll('circle').attr("r", 0);
+                document.getElementById("OptimizeLayout").style.display = "block";
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1246,6 +1247,27 @@ function CreateLeftGraph(rooms, roomID) {
                 console.error("   Response:", xhr.responseText);
                 console.error("=".repeat(80) + "\n");
                 alert("Error generating floor plan. Check browser console for details.");
+            });
+        };
+
+        // Optimize button handler
+        document.getElementById("OptimizeLayout").onclick = function () {
+            console.log("🔧 [FRONTEND] Optimize — sending OptimizeLayout request");
+            var btn = document.getElementById("OptimizeLayout");
+            btn.textContent = "Optimizing…";
+            btn.style.backgroundColor = "#616161";
+
+            $.get("/index/OptimizeLayout/", {}, function (opt_ret) {
+                console.log("✅ [FRONTEND] OptimizeLayout response received");
+                CreateLeftPlan(opt_ret['roomret'], opt_ret['exterior'], opt_ret["door"],
+                               opt_ret["windows"], opt_ret["indoor"], opt_ret["windowsline"]);
+                btn.textContent = "Optimize";
+                btn.style.backgroundColor = "#00897b";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ [FRONTEND] OptimizeLayout FAILED:", xhr.responseText);
+                alert("Optimization failed. Check the server console for details.");
+                btn.textContent = "Optimize";
+                btn.style.backgroundColor = "#00897b";
             });
         };
 

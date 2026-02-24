@@ -510,6 +510,14 @@ function LoadTestBoundary(files) {
 }
 
 function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize) {
+    // Reset "Show Outside" toggle state whenever the floor plan is redrawn
+    var outsideBtn = document.getElementById("showOutsideButton");
+    if (outsideBtn) {
+        outsideBtn.setAttribute("data-revealed", "false");
+        outsideBtn.innerHTML = "👁 Show Outside";
+        outsideBtn.style.backgroundColor = "#6A1B9A";
+    }
+
     d3.select('body').select('#LeftBaseSVG').selectAll('rect').remove();
     d3.select('body').select('#LeftLayoutSVG').selectAll("svg > *").remove();
 
@@ -1061,6 +1069,14 @@ function GraphSearch() {
 }
 
 function CreateLeftFloorPlan(boxes, exterior, door) {
+    // Reset "Show Outside" toggle state whenever the floor plan is redrawn
+    var outsideBtn = document.getElementById("showOutsideButton");
+    if (outsideBtn) {
+        outsideBtn.setAttribute("data-revealed", "false");
+        outsideBtn.innerHTML = "👁 Show Outside";
+        outsideBtn.style.backgroundColor = "#6A1B9A";
+    }
+
     // Clear existing floor plan
     d3.select('#LeftLayoutSVG').selectAll('rect').remove();
     d3.select('#LeftLayoutSVG').selectAll('polygon').remove();
@@ -1220,6 +1236,8 @@ function CreateLeftGraph(rooms, roomID) {
                 CreateLeftPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret["door"], adjust_ret["windows"], adjust_ret["indoor"], adjust_ret["windowsline"]);
                 d3.select('body').select('#LeftGraphSVG').selectAll('circle').attr("r", 0);
                 document.getElementById("OptimizeLayout").style.display = "block";
+                var showOutsideBtn = document.getElementById("showOutsideButton");
+                if (showOutsideBtn) { showOutsideBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1269,6 +1287,80 @@ function CreateLeftGraph(rooms, roomID) {
                 btn.textContent = "Optimize";
                 btn.style.backgroundColor = "#00897b";
             });
+        };
+
+        // Show Outside toggle handler
+        document.getElementById("showOutsideButton").onclick = function () {
+            var btn = this;
+            var svg = d3.select("#LeftLayoutSVG");
+            var revealed = btn.getAttribute("data-revealed") === "true";
+
+            if (!revealed) {
+                // REVEAL: strip clip-path, highlight rooms that extend outside boundary
+                btn.setAttribute("data-revealed", "true");
+                btn.innerHTML = "👁 Hide Outside";
+                btn.style.backgroundColor = "#c62828";
+
+                // Get boundary bounding box from the clipPath polygon in this SVG
+                var clipPoly = document.querySelector("#LeftLayoutSVG clipPath polygon");
+                var bndXMin = 0, bndXMax = 9999, bndYMin = 0, bndYMax = 9999;
+                if (clipPoly) {
+                    var pts = clipPoly.getAttribute("points").trim().split(/[\s,]+/);
+                    var xs = [], ys = [];
+                    for (var k = 0; k + 1 < pts.length; k += 2) {
+                        xs.push(parseFloat(pts[k]));
+                        ys.push(parseFloat(pts[k + 1]));
+                    }
+                    if (xs.length) {
+                        bndXMin = Math.min.apply(null, xs);
+                        bndXMax = Math.max.apply(null, xs);
+                        bndYMin = Math.min.apply(null, ys);
+                        bndYMax = Math.max.apply(null, ys);
+                    }
+                }
+
+                // Strip clip-path from every room rect and mark rooms extending outside
+                svg.selectAll("rect").each(function () {
+                    var r = d3.select(this);
+                    var cp = r.attr("clip-path");
+                    if (cp) {
+                        r.attr("data-orig-clip", cp).attr("clip-path", null);
+
+                        var rx = parseFloat(r.attr("x"));
+                        var ry = parseFloat(r.attr("y"));
+                        var rw = parseFloat(r.attr("width"));
+                        var rh = parseFloat(r.attr("height"));
+                        var outside = rx < bndXMin - 0.5 || rx + rw > bndXMax + 0.5 ||
+                                      ry < bndYMin - 0.5 || ry + rh > bndYMax + 0.5;
+                        if (outside) {
+                            svg.append("rect")
+                                .attr("class", "outsideOverlay")
+                                .attr("x", rx).attr("y", ry)
+                                .attr("width", rw).attr("height", rh)
+                                .attr("fill", "rgba(211,47,47,0.08)")
+                                .attr("stroke", "#d32f2f")
+                                .attr("stroke-width", 2)
+                                .attr("stroke-dasharray", "6,3")
+                                .attr("pointer-events", "none");
+                        }
+                    }
+                });
+
+            } else {
+                // HIDE: restore clip-paths and remove overlays
+                btn.setAttribute("data-revealed", "false");
+                btn.innerHTML = "👁 Show Outside";
+                btn.style.backgroundColor = "#6A1B9A";
+
+                svg.selectAll("rect").each(function () {
+                    var r = d3.select(this);
+                    var orig = r.attr("data-orig-clip");
+                    if (orig) {
+                        r.attr("clip-path", orig).attr("data-orig-clip", null);
+                    }
+                });
+                svg.selectAll(".outsideOverlay").remove();
+            }
         };
 
         // Auto-Adjust button handler

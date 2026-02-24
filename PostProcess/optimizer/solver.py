@@ -34,6 +34,27 @@ CANVAS       = 256
 MIN_ROOM_PX  = 10   # ~0.7 m — small floor to allow solver flexibility
 
 
+def _poly_x_range_at_y(vertices, y):
+    """
+    Horizontal scan of a closed polygon at height y.
+    Returns (x_lo, x_hi) of the polygon interior, or None if y is outside.
+    vertices: list of [x, y] pairs (closed — last == first, or auto-closed).
+    """
+    xs = []
+    n = len(vertices)
+    for i in range(n - 1):
+        x1, y1 = float(vertices[i][0]),   float(vertices[i][1])
+        x2, y2 = float(vertices[i+1][0]), float(vertices[i+1][1])
+        if y1 == y2:
+            continue                          # horizontal edge — skip
+        if min(y1, y2) < y <= max(y1, y2):
+            xi = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            xs.append(xi)
+    if len(xs) < 2:
+        return None
+    return min(xs), max(xs)
+
+
 def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     """
     Run the CP-SAT layout optimizer.
@@ -59,15 +80,20 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     if K == 0:
         return boxes, 'OPTIMAL'
 
-    # --- Boundary bounding box -----------------------------------------------
+    # --- Boundary bounding box and polygon vertices --------------------------
     if boundary is not None and len(boundary) > 0:
         bnd = np.array(boundary)
         bx0 = int(np.min(bnd[:, 0]))
         by0 = int(np.min(bnd[:, 1]))
         bx1 = int(np.max(bnd[:, 0]))
         by1 = int(np.max(bnd[:, 1]))
+        # Build ordered polygon vertex list for x-range scan
+        poly_verts = bnd[:, :2].tolist()          # [[x,y], ...]
+        if poly_verts[0] != poly_verts[-1]:
+            poly_verts.append(poly_verts[0])      # close the polygon
     else:
         bx0, by0, bx1, by1 = 0, 0, CANVAS - 1, CANVAS - 1
+        poly_verts = None
 
     W = bx1 - bx0
     H = by1 - by0
@@ -178,23 +204,9 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
         # _INSIDE and _SURROUNDING handled above as containment
 
     # --- Wall-sharing for adjacent pairs -------------------------------------
-    # Two modes depending on room sizes:
-    #
-    # INTERNAL (containment): the smaller room sits fully inside the larger
-    #   room's bounding box — models en-suite bathrooms, walk-in closets, etc.
-    #   The displacement objective then places it against whichever wall it
-    #   was already nearest to.
-    #
-    # EXTERNAL (touching): rooms of similar size sit side-by-side with a
-    #   shared wall between them (xe[u] == x[v] style).
-    #
-    # Threshold: if the smaller room's area is < 60 % of the larger room's
-    # area, treat the pair as internal (containment); otherwise external.
-    #
-    # LivingRoom (type 0) is excluded from both modes.
-
     CONTAINMENT_RATIO = 0.60
     wall_constraints_added = 0
+    size_ratio_inner = set()   # rooms forced inside a larger room by size ratio
 
     for edge in edges:
         u, v, pred = int(edge[0]), int(edge[1]), int(edge[2])
@@ -219,16 +231,13 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
             ratio = area_v / area_u
 
         if ratio < CONTAINMENT_RATIO:
-            # --- Internal wall sharing: smaller room inside larger -----------
             model.Add(x[inner]  >= x[outer])
             model.Add(xe[inner] <= xe[outer])
             model.Add(y[inner]  >= y[outer])
             model.Add(ye[inner] <= ye[outer])
+            size_ratio_inner.add(inner)
             wall_constraints_added += 1
-            print(f"  [WALL] room {inner} INSIDE room {outer}  "
-                  f"(ratio={ratio:.2f}, types {int(types[inner])}→{int(types[outer])})")
         else:
-            # --- External wall sharing: rooms touch along their shared edge --
             if pred == _LEFT_OF:
                 model.Add(xe[u] == x[v])
             elif pred == _RIGHT_OF:
@@ -238,10 +247,140 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
             elif pred == _BELOW:
                 model.Add(ye[v] == y[u])
             wall_constraints_added += 1
-            print(f"  [WALL] room {u} EXTERNAL pred={pred}  "
-                  f"(ratio={ratio:.2f}, types {int(types[u])}→{int(types[v])})")
 
-    print(f"  [WALL] {wall_constraints_added} wall-sharing constraints added")
+    # --- Inward push: rooms whose original position overhangs a boundary wall --
+    # Uses the raw neural-network boxes (before clipping) to detect overhang.
+    # Any edge that sticks out is hard-snapped to that wall.  The displacement
+    # objective then preserves the room's size and slides it inward.
+    #
+    # Excluded: LivingRoom (type 0) and rooms already pinned inside another.
+    push_excluded = set(contained_in.keys()) | size_ratio_inner
+    push_inward   = set()   # rooms handled here; skipped in threshold-snap below
+    push_added    = 0
+
+    for i in range(K):
+        if int(types[i]) == 0 or i in push_excluded:
+            continue
+
+        orig_x0 = int(boxes[i, 0])
+        orig_y0 = int(boxes[i, 1])
+        orig_x1 = int(boxes[i, 2])
+        orig_y1 = int(boxes[i, 3])
+
+        pushed = False
+
+        if orig_x1 > bx1:
+            model.Add(xe[i] == bx1)
+            pushed = True
+        if orig_x0 < bx0:
+            model.Add(x[i] == bx0)
+            pushed = True
+        if orig_y1 > by1:
+            model.Add(ye[i] == by1)
+            pushed = True
+        if orig_y0 < by0:
+            model.Add(y[i] == by0)
+            pushed = True
+
+        if poly_verts is not None:
+            cy = (orig_y0 + orig_y1) / 2.0
+            xr = _poly_x_range_at_y(poly_verts, cy)
+            if xr is not None:
+                px_lo, px_hi = int(np.floor(xr[0])), int(np.ceil(xr[1]))
+                if orig_x0 < px_lo:
+                    model.Add(x[i] >= px_lo)
+                    pushed = True
+                if orig_x1 > px_hi:
+                    model.Add(xe[i] <= px_hi)
+                    pushed = True
+
+        if pushed:
+            push_inward.add(i)
+            push_added += 1
+
+    # --- Boundary wall snapping (threshold-based) ----------------------------
+    SNAP_THRESHOLD = max(20, min(W, H) // 8)
+    snap_excluded  = push_excluded | push_inward
+    snap_added     = 0
+
+    for i in range(K):
+        if int(types[i]) == 0:
+            continue
+        if i in snap_excluded:
+            continue
+
+        xi0, yi0 = x0[i], y0[i]
+        xi1, yi1 = x0[i] + w0[i], y0[i] + h0[i]
+
+        dist_left   = xi0 - bx0
+        dist_right  = bx1 - xi1
+        dist_top    = yi0 - by0
+        dist_bottom = by1 - yi1
+
+        if min(dist_left, dist_right, dist_top, dist_bottom) > SNAP_THRESHOLD:
+            continue
+
+        if dist_left <= SNAP_THRESHOLD:
+            model.Add(x[i] == bx0)
+        if dist_right <= SNAP_THRESHOLD:
+            model.Add(xe[i] == bx1)
+        if dist_top <= SNAP_THRESHOLD:
+            model.Add(y[i] == by0)
+        if dist_bottom <= SNAP_THRESHOLD:
+            model.Add(ye[i] == by1)
+        snap_added += 1
+
+    # --- Gap closing ---------------------------------------------------------
+    # For any two rooms that are nearly touching (gap < GAP_CLOSE_PX) and
+    # already aligned in the perpendicular direction (they share wall length),
+    # force them to actually touch.
+    #
+    # Only applied to non-intentional pairs (intentional pairs can overlap and
+    # are handled by the containment / wall-sharing constraints above).
+    GAP_CLOSE_PX = 15
+    gap_closed = 0
+
+    for i in range(K):
+        for j in range(i + 1, K):
+            if (i, j) in intentional:
+                continue
+
+            xi0, yi0 = x0[i], y0[i]
+            xi1, yi1 = x0[i] + w0[i], y0[i] + h0[i]
+            xj0, yj0 = x0[j], y0[j]
+            xj1, yj1 = x0[j] + w0[j], y0[j] + h0[j]
+
+            # Horizontal gap: i is to the left of j
+            h_gap = xj0 - xi1
+            if 0 < h_gap <= GAP_CLOSE_PX:
+                y_overlap = min(yi1, yj1) - max(yi0, yj0)
+                if y_overlap > 0:
+                    model.Add(xe[i] == x[j])
+                    gap_closed += 1
+                    continue
+
+            h_gap_rev = xi0 - xj1
+            if 0 < h_gap_rev <= GAP_CLOSE_PX:
+                y_overlap = min(yi1, yj1) - max(yi0, yj0)
+                if y_overlap > 0:
+                    model.Add(xe[j] == x[i])
+                    gap_closed += 1
+                    continue
+
+            v_gap = yj0 - yi1
+            if 0 < v_gap <= GAP_CLOSE_PX:
+                x_overlap = min(xi1, xj1) - max(xi0, xj0)
+                if x_overlap > 0:
+                    model.Add(ye[i] == y[j])
+                    gap_closed += 1
+                    continue
+
+            v_gap_rev = yi0 - yj1
+            if 0 < v_gap_rev <= GAP_CLOSE_PX:
+                x_overlap = min(xi1, xj1) - max(xi0, xj0)
+                if x_overlap > 0:
+                    model.Add(ye[j] == y[i])
+                    gap_closed += 1
 
     # --- Objective: minimize L1 displacement from initial boxes --------------
     dx = [model.NewIntVar(0, W, f'dx_{i}') for i in range(K)]
@@ -274,12 +413,6 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
             result[i] = [xi, yi, xi + wi, yi + hi]
         status = 'OPTIMAL' if status_code == cp_model.OPTIMAL else 'FEASIBLE'
         print(f"  [SOLVER] Status: {status}")
-        print(f"  [SOLVER] Room positions before → after:")
-        for i in range(K):
-            b0, b1 = boxes[i], result[i]
-            print(f"    room {i}: [{b0[0]},{b0[1]},{b0[2]},{b0[3]}] → "
-                  f"[{b1[0]},{b1[1]},{b1[2]},{b1[3]}]  "
-                  f"(dx={b1[0]-b0[0]:+d} dy={b1[1]-b0[1]:+d})")
         return result, status
 
     # Solver failed — return original boxes clipped to boundary

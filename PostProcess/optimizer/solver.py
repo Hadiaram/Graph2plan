@@ -177,8 +177,73 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
             model.Add(cy_u >= cy_v)
         # _INSIDE and _SURROUNDING handled above as containment
 
+    # --- Wall-sharing for adjacent pairs -------------------------------------
+    # Two modes depending on room sizes:
+    #
+    # INTERNAL (containment): the smaller room sits fully inside the larger
+    #   room's bounding box — models en-suite bathrooms, walk-in closets, etc.
+    #   The displacement objective then places it against whichever wall it
+    #   was already nearest to.
+    #
+    # EXTERNAL (touching): rooms of similar size sit side-by-side with a
+    #   shared wall between them (xe[u] == x[v] style).
+    #
+    # Threshold: if the smaller room's area is < 60 % of the larger room's
+    # area, treat the pair as internal (containment); otherwise external.
+    #
+    # LivingRoom (type 0) is excluded from both modes.
+
+    CONTAINMENT_RATIO = 0.60
+    wall_constraints_added = 0
+
+    for edge in edges:
+        u, v, pred = int(edge[0]), int(edge[1]), int(edge[2])
+        if u >= K or v >= K:
+            continue
+        if pred in (_INSIDE, _SURROUNDING):
+            continue   # already handled by containment block above
+        if int(types[u]) == 0 or int(types[v]) == 0:
+            continue   # exclude LivingRoom
+
+        area_u = w0[u] * h0[u]
+        area_v = w0[v] * h0[v]
+
+        if area_u == 0 or area_v == 0:
+            continue
+
+        if area_u <= area_v:
+            inner, outer = u, v
+            ratio = area_u / area_v
+        else:
+            inner, outer = v, u
+            ratio = area_v / area_u
+
+        if ratio < CONTAINMENT_RATIO:
+            # --- Internal wall sharing: smaller room inside larger -----------
+            model.Add(x[inner]  >= x[outer])
+            model.Add(xe[inner] <= xe[outer])
+            model.Add(y[inner]  >= y[outer])
+            model.Add(ye[inner] <= ye[outer])
+            wall_constraints_added += 1
+            print(f"  [WALL] room {inner} INSIDE room {outer}  "
+                  f"(ratio={ratio:.2f}, types {int(types[inner])}→{int(types[outer])})")
+        else:
+            # --- External wall sharing: rooms touch along their shared edge --
+            if pred == _LEFT_OF:
+                model.Add(xe[u] == x[v])
+            elif pred == _RIGHT_OF:
+                model.Add(xe[v] == x[u])
+            elif pred == _ABOVE:
+                model.Add(ye[u] == y[v])
+            elif pred == _BELOW:
+                model.Add(ye[v] == y[u])
+            wall_constraints_added += 1
+            print(f"  [WALL] room {u} EXTERNAL pred={pred}  "
+                  f"(ratio={ratio:.2f}, types {int(types[u])}→{int(types[v])})")
+
+    print(f"  [WALL] {wall_constraints_added} wall-sharing constraints added")
+
     # --- Objective: minimize L1 displacement from initial boxes --------------
-    # |x[i] - x0[i]|  encoded via AbsEquality auxiliary variable
     dx = [model.NewIntVar(0, W, f'dx_{i}') for i in range(K)]
     dy = [model.NewIntVar(0, H, f'dy_{i}') for i in range(K)]
     dw = [model.NewIntVar(0, W, f'dw_{i}') for i in range(K)]
@@ -208,9 +273,17 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
             hi = solver.Value(h[i])
             result[i] = [xi, yi, xi + wi, yi + hi]
         status = 'OPTIMAL' if status_code == cp_model.OPTIMAL else 'FEASIBLE'
+        print(f"  [SOLVER] Status: {status}")
+        print(f"  [SOLVER] Room positions before → after:")
+        for i in range(K):
+            b0, b1 = boxes[i], result[i]
+            print(f"    room {i}: [{b0[0]},{b0[1]},{b0[2]},{b0[3]}] → "
+                  f"[{b1[0]},{b1[1]},{b1[2]},{b1[3]}]  "
+                  f"(dx={b1[0]-b0[0]:+d} dy={b1[1]-b0[1]:+d})")
         return result, status
 
     # Solver failed — return original boxes clipped to boundary
+    print("  [SOLVER] Status: FAILED — returning original boxes unchanged")
     warnings.warn("CP-SAT solver failed to find a feasible solution. "
                   "Returning original boxes clipped to boundary.", UserWarning)
     result = boxes.copy()

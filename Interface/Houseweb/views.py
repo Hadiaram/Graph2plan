@@ -1022,6 +1022,88 @@ def OptimizeLayout(request):
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
+def ExpandLivingRoom(request):
+    global last_fp_data, last_testname
+
+    if last_fp_data is None:
+        return HttpResponse(
+            json.dumps({'error': 'No layout generated yet. Click Generate first.'}),
+            content_type="application/json",
+            status=400,
+        )
+
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import expand_living_room, boxes_to_boundaries
+
+    print("[EXPAND LR] Running LivingRoom expansion pass...")
+    exp_boxes = expand_living_room(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.boundary,
+    )
+    print("[EXPAND LR] Done.")
+
+    last_fp_data.newBox    = exp_boxes
+    last_fp_data.rBoundary = boxes_to_boundaries(exp_boxes)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    # Build response in the same format as OptimizeLayout / AdjustGraph
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    K = len(exp_boxes)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in exp_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
 def RelBox(request):
     id = request.GET.get("selectRect")
     print(id)

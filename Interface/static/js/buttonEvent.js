@@ -517,6 +517,11 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
         outsideBtn.innerHTML = "👁 Show Outside";
         outsideBtn.style.backgroundColor = "#6A1B9A";
     }
+    var expandBtn = document.getElementById("expandLivingRoom");
+    if (expandBtn) {
+        expandBtn.textContent = "Expand LR";
+        expandBtn.style.backgroundColor = "#e65100";
+    }
 
     d3.select('body').select('#LeftBaseSVG').selectAll('rect').remove();
     d3.select('body').select('#LeftLayoutSVG').selectAll("svg > *").remove();
@@ -1076,6 +1081,11 @@ function CreateLeftFloorPlan(boxes, exterior, door) {
         outsideBtn.innerHTML = "👁 Show Outside";
         outsideBtn.style.backgroundColor = "#6A1B9A";
     }
+    var expandBtn = document.getElementById("expandLivingRoom");
+    if (expandBtn) {
+        expandBtn.textContent = "Expand LR";
+        expandBtn.style.backgroundColor = "#e65100";
+    }
 
     // Clear existing floor plan
     d3.select('#LeftLayoutSVG').selectAll('rect').remove();
@@ -1238,6 +1248,8 @@ function CreateLeftGraph(rooms, roomID) {
                 document.getElementById("OptimizeLayout").style.display = "block";
                 var showOutsideBtn = document.getElementById("showOutsideButton");
                 if (showOutsideBtn) { showOutsideBtn.style.display = "block"; }
+                var expandLRBtn = document.getElementById("expandLivingRoom");
+                if (expandLRBtn) { expandLRBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1286,6 +1298,26 @@ function CreateLeftGraph(rooms, roomID) {
                 alert("Optimization failed. Check the server console for details.");
                 btn.textContent = "Optimize";
                 btn.style.backgroundColor = "#00897b";
+            });
+        };
+
+        // Expand Living Room button handler
+        document.getElementById("expandLivingRoom").onclick = function () {
+            var btn = document.getElementById("expandLivingRoom");
+            btn.textContent = "Expanding…";
+            btn.style.backgroundColor = "#616161";
+
+            $.get("/index/ExpandLivingRoom/", {}, function (ret) {
+                console.log("✅ [FRONTEND] ExpandLivingRoom response received");
+                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
+                               ret["windows"], ret["indoor"], ret["windowsline"]);
+                btn.textContent = "Expand LR";
+                btn.style.backgroundColor = "#e65100";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ [FRONTEND] ExpandLivingRoom FAILED:", xhr.responseText);
+                alert("Expansion failed. Check the server console for details.");
+                btn.textContent = "Expand LR";
+                btn.style.backgroundColor = "#e65100";
             });
         };
 

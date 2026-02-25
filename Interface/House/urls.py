@@ -39,6 +39,7 @@ urlpatterns = [
     path(r'index/RelBox/', views.RelBox),
     path(r'index/Save_Editbox/', views.Save_Editbox),
     path(r'index/OptimizeLayout/', views.OptimizeLayout),
+    path(r'index/ExpandLivingRoom/', views.ExpandLivingRoom),
 
     path('home', views.home),
 

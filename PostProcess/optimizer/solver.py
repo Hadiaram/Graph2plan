@@ -427,6 +427,197 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     return result, 'FAILED'
 
 
+def expand_living_room(boxes, types, boundary):
+    """
+    Expand the LivingRoom (type 0) to fill empty space in all four directions.
+
+    For each direction the algorithm:
+      1. Finds rooms that are on that side of the LivingRoom *and* overlap with
+         it in the perpendicular axis (i.e., rooms that would be in the path of
+         the expansion).
+      2. Shifts that group of rooms as a unit toward the boundary wall until the
+         outermost room in the group touches the wall.
+      3. Extends the LivingRoom edge to touch the nearest shifted room (or all
+         the way to the wall when nothing is blocking).
+
+    Directions are processed sequentially (left → right → top → bottom).
+    The full 4-direction cycle repeats until LR's bounds stop changing
+    (convergence), allowing chain reactions: e.g. expanding RIGHT may expose
+    new rooms in the BOTTOM blocking set that weren't in LR's original x-range.
+
+    Returns
+    -------
+    expanded_boxes : np.ndarray  shape (K, 4)  dtype int
+    """
+    LR_TYPE = 0
+    boxes = np.array(boxes, dtype=float)
+    types = np.array(types, dtype=int)
+    K = len(boxes)
+
+    lr_indices = np.where(types == LR_TYPE)[0]
+    if len(lr_indices) == 0:
+        return boxes.astype(int)
+    lr_idx = lr_indices[0]
+
+    bnd  = np.array(boundary)
+    bx0  = float(np.min(bnd[:, 0]))
+    by0  = float(np.min(bnd[:, 1]))
+    bx1  = float(np.max(bnd[:, 0]))
+    by1  = float(np.max(bnd[:, 1]))
+
+    print(f"  [EXPAND] LR (room {lr_idx}): {boxes[lr_idx].tolist()}")
+    print(f"  [EXPAND] Boundary: x=[{bx0},{bx1}] y=[{by0},{by1}]")
+    # Print all non-LR rooms for reference
+    for i in range(K):
+        if i != lr_idx:
+            print(f"  [EXPAND] Room {i} (type {types[i]}): {boxes[i].tolist()}")
+
+    moved_rooms = set()   # rooms fixed after being pushed in a previous pass
+    MAX_PASSES = 20
+    for pass_num in range(1, MAX_PASSES + 1):
+        prev_lr    = boxes[lr_idx].copy()
+        pass_start = boxes.copy()           # snapshot to detect which rooms move this pass
+        print(f"  [EXPAND] === PASS {pass_num} (fixed={sorted(moved_rooms)}) ===")
+
+        for direction in ('left', 'right', 'top', 'bottom'):
+            lx0, ly0, lx1, ly1 = (float(v) for v in boxes[lr_idx])
+            print(f"  [EXPAND] --- {direction.upper()} --- LR now: [{lx0},{ly0},{lx1},{ly1}]")
+
+            if direction == 'left':
+                blocking = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms
+                    and boxes[i][2] <= lx0
+                    and min(boxes[i][3], ly1) - max(boxes[i][1], ly0) > 0
+                ]
+                print(f"  [EXPAND] blocking={blocking}")
+                if not blocking:
+                    print(f"  [EXPAND] no blockers → LR.x0 = {bx0}")
+                    boxes[lr_idx][0] = bx0
+                else:
+                    # Greedy compaction: sort outermost (smallest x0) first, pack toward bx0
+                    srt = sorted(blocking, key=lambda i: boxes[i][0])
+                    ws  = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
+                    placed = {}
+                    for i in srt:
+                        pos = bx0
+                        for j in placed:
+                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
+                                pos = max(pos, placed[j] + ws[j])
+                        placed[i] = pos
+                    for i in srt:
+                        boxes[i][0] = placed[i]
+                        boxes[i][2] = placed[i] + ws[i]
+                        print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
+                    new_x0 = max(placed[i] + ws[i] for i in srt)
+                    print(f"  [EXPAND] LR.x0: {lx0} → {new_x0}")
+                    boxes[lr_idx][0] = new_x0
+
+            elif direction == 'right':
+                blocking = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms
+                    and boxes[i][0] >= lx1
+                    and min(boxes[i][3], ly1) - max(boxes[i][1], ly0) > 0
+                ]
+                print(f"  [EXPAND] blocking={blocking}")
+                if not blocking:
+                    print(f"  [EXPAND] no blockers → LR.x1 = {bx1}")
+                    boxes[lr_idx][2] = bx1
+                else:
+                    # Greedy compaction: sort outermost (largest x1) first, pack toward bx1
+                    srt = sorted(blocking, key=lambda i: -boxes[i][2])
+                    ws  = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
+                    placed = {}   # i -> new x1
+                    for i in srt:
+                        pos = bx1
+                        for j in placed:
+                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
+                                pos = min(pos, placed[j] - ws[j])
+                        placed[i] = pos
+                    for i in srt:
+                        boxes[i][2] = placed[i]
+                        boxes[i][0] = placed[i] - ws[i]
+                        print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
+                    new_x1 = min(placed[i] - ws[i] for i in srt)
+                    print(f"  [EXPAND] LR.x1: {lx1} → {new_x1}")
+                    boxes[lr_idx][2] = new_x1
+
+            elif direction == 'top':
+                blocking = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms
+                    and boxes[i][3] <= ly0
+                    and min(boxes[i][2], lx1) - max(boxes[i][0], lx0) > 0
+                ]
+                print(f"  [EXPAND] blocking={blocking}")
+                if not blocking:
+                    print(f"  [EXPAND] no blockers → LR.y0 = {by0}")
+                    boxes[lr_idx][1] = by0
+                else:
+                    # Greedy compaction: sort outermost (smallest y0) first, pack toward by0
+                    srt = sorted(blocking, key=lambda i: boxes[i][1])
+                    hs  = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
+                    placed = {}   # i -> new y0
+                    for i in srt:
+                        pos = by0
+                        for j in placed:
+                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
+                                pos = max(pos, placed[j] + hs[j])
+                        placed[i] = pos
+                    for i in srt:
+                        boxes[i][1] = placed[i]
+                        boxes[i][3] = placed[i] + hs[i]
+                        print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
+                    new_y0 = max(placed[i] + hs[i] for i in srt)
+                    print(f"  [EXPAND] LR.y0: {ly0} → {new_y0}")
+                    boxes[lr_idx][1] = new_y0
+
+            elif direction == 'bottom':
+                blocking = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms
+                    and boxes[i][1] >= ly1
+                    and min(boxes[i][2], lx1) - max(boxes[i][0], lx0) > 0
+                ]
+                print(f"  [EXPAND] blocking={blocking}")
+                if not blocking:
+                    print(f"  [EXPAND] no blockers → LR.y1 = {by1}")
+                    boxes[lr_idx][3] = by1
+                else:
+                    # Greedy compaction: sort outermost (largest y1) first, pack toward by1
+                    srt = sorted(blocking, key=lambda i: -boxes[i][3])
+                    hs  = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
+                    placed = {}   # i -> new y1
+                    for i in srt:
+                        pos = by1
+                        for j in placed:
+                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
+                                pos = min(pos, placed[j] - hs[j])
+                        placed[i] = pos
+                    for i in srt:
+                        boxes[i][3] = placed[i]
+                        boxes[i][1] = placed[i] - hs[i]
+                        print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
+                    new_y1 = min(placed[i] - hs[i] for i in srt)
+                    print(f"  [EXPAND] LR.y1: {ly1} → {new_y1}")
+                    boxes[lr_idx][3] = new_y1
+
+        # Rooms that moved this pass become fixed for all subsequent passes
+        for i in range(K):
+            if i != lr_idx and not np.allclose(boxes[i], pass_start[i]):
+                moved_rooms.add(i)
+
+        if np.allclose(boxes[lr_idx], prev_lr):
+            print(f"  [EXPAND] Converged after {pass_num} pass(es)")
+            break
+    else:
+        print(f"  [EXPAND] Warning: reached max passes ({MAX_PASSES}) without convergence")
+
+    print(f"  [EXPAND] Final LR: {boxes[lr_idx].tolist()}")
+    return boxes.astype(int)
+
+
 def boxes_to_boundaries(boxes):
     """
     Convert optimized [x0, y0, x1, y1] boxes to rectangular room boundary

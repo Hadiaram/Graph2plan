@@ -25,6 +25,22 @@ try:
 except ImportError:
     warnings.warn("MATLAB engine not available. Some features may be limited.", UserWarning)
 
+# Try to import DXF export
+HAS_DXF_EXPORT = False
+try:
+    from Houseweb.dxf_export import save_floorplan_dxf
+    HAS_DXF_EXPORT = True
+    print("[Init] DXF export module loaded successfully ✓")
+except ImportError as e:
+    print(f"[Init] DXF export not available: {e}")
+    warnings.warn("DXF export not available. Install ezdxf: pip install ezdxf", UserWarning)
+
+# DXF Export Configuration
+ENABLE_AUTO_DXF_EXPORT = False  # Set to True to auto-save DXF on every save
+DXF_SCALE = 1.0                 # Scale factor (1.0 = pixels, 0.01 = cm)
+DXF_WALL_THICKNESS = 3.0        # Wall thickness in drawing units
+DXF_SAVE_PATH = r"C:\Users\hmbashir\source\DXF Floor Plans"
+
 global test_data, test_data_topk, testNameList, trainNameList
 global train_data, trainTF, train_data_eNum, train_data_rNum
 global engview, model
@@ -1735,6 +1751,87 @@ def retrieve_bf(tf_trainsub, datum, k=20):
         index = np.argpartition(dist, k)[:k]
         index = index[np.argsort(dist[index])]
     return index
+
+
+def Export_DXF(request):
+    """
+    Manual DXF export endpoint - triggered by button click.
+    Loads from the saved .mat file (same approach as ai-training-branch).
+    """
+    global last_testname
+
+    try:
+        if not HAS_DXF_EXPORT:
+            return JsonResponse({
+                "success": False,
+                "error": "DXF export not available. Please install ezdxf: pip install ezdxf"
+            }, status=500)
+
+        if not last_testname:
+            return JsonResponse({
+                "success": False,
+                "error": "No layout generated yet. Click Generate first."
+            }, status=400)
+
+        # Construct mat file path (saved by AdjustGraph/OptimizeLayout/ExpandLivingRoom)
+        base_id = last_testname.split(',')[0].split('.')[0]
+        mat_path = f"./static/{base_id}.mat"
+
+        if not os.path.exists(mat_path):
+            return JsonResponse({
+                "success": False,
+                "error": f"Floor plan file not found: {mat_path}. Click Generate first."
+            }, status=404)
+
+        print(f"[DXF Export] Loading {mat_path}...")
+        data = sio.loadmat(mat_path)
+        fp_data = data['data'][0, 0]
+        print(f"[DXF Export] Available fields: {fp_data.dtype.names}")
+
+        custom_scale = request.GET.get("scale", None)
+        custom_filename = request.GET.get("filename", None)
+
+        dxf_filename = custom_filename if custom_filename else f"{base_id}.dxf"
+        if not dxf_filename.endswith('.dxf'):
+            dxf_filename += '.dxf'
+
+        os.makedirs(DXF_SAVE_PATH, exist_ok=True)
+        dxf_path = os.path.join(DXF_SAVE_PATH, dxf_filename)
+        scale = float(custom_scale) if custom_scale else DXF_SCALE
+
+        print(f"[DXF Export] Exporting to {dxf_path} (scale={scale})...")
+        success = save_floorplan_dxf(
+            fp_data, dxf_path,
+            scale=scale,
+            wall_thickness=DXF_WALL_THICKNESS,
+            include_labels=True,
+            include_dimensions=False
+        )
+
+        if success:
+            file_size = os.path.getsize(dxf_path) / 1024
+            room_count = 0
+            if 'rType' in fp_data.dtype.names:
+                room_count = len(np.array(fp_data['rType']).flatten())
+            print(f"[DXF Export] ✓ Exported {dxf_filename} ({file_size:.1f} KB, {room_count} rooms)")
+            return JsonResponse({
+                "success": True,
+                "filename": dxf_filename,
+                "path": dxf_path,
+                "size_kb": round(file_size, 1),
+                "scale": scale,
+                "room_count": room_count,
+            })
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": "DXF export failed — check server console for details"
+            }, status=500)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 if __name__ == "__main__":

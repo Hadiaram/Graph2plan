@@ -1250,6 +1250,8 @@ function CreateLeftGraph(rooms, roomID) {
                 if (showOutsideBtn) { showOutsideBtn.style.display = "block"; }
                 var expandLRBtn = document.getElementById("expandLivingRoom");
                 if (expandLRBtn) { expandLRBtn.style.display = "block"; }
+                var dxfBtn = document.getElementById("exportDXFButton");
+                if (dxfBtn) { dxfBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1318,6 +1320,38 @@ function CreateLeftGraph(rooms, roomID) {
                 alert("Expansion failed. Check the server console for details.");
                 btn.textContent = "Expand LR";
                 btn.style.backgroundColor = "#e65100";
+            });
+        };
+
+        // Export DXF button handler
+        document.getElementById("exportDXFButton").onclick = function () {
+            var dxfBtn = document.getElementById("exportDXFButton");
+            var originalText = dxfBtn.innerHTML;
+            dxfBtn.innerHTML = "⏳ Exporting...";
+            dxfBtn.style.backgroundColor = "#757575";
+            dxfBtn.style.cursor = "wait";
+
+            $.get("/index/Export_DXF/", {}, function (data) {
+                dxfBtn.innerHTML = originalText;
+                dxfBtn.style.backgroundColor = "#2196F3";
+                dxfBtn.style.cursor = "pointer";
+
+                if (data.success) {
+                    alert("✅ DXF Export Complete!\n\nFile: " + data.filename +
+                          "\nSize: " + data.size_kb + " KB\nRooms: " + data.room_count);
+                } else {
+                    alert("❌ DXF Export failed:\n" + data.error);
+                }
+            }).fail(function (xhr, status, error) {
+                dxfBtn.innerHTML = originalText;
+                dxfBtn.style.backgroundColor = "#2196F3";
+                dxfBtn.style.cursor = "pointer";
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    alert("❌ DXF Export failed:\n" + (resp.error || error));
+                } catch (e) {
+                    alert("❌ DXF Export request failed:\n" + error);
+                }
             });
         };
 

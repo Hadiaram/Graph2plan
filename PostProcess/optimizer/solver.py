@@ -472,11 +472,19 @@ def expand_living_room(boxes, types, boundary):
         if i != lr_idx:
             print(f"  [EXPAND] Room {i} (type {types[i]}): {boxes[i].tolist()}")
 
+    WALL_TOL = 2.0
+    wall_left_attached   = set(i for i in range(K) if i != lr_idx and float(boxes[i][0]) - bx0 <= WALL_TOL)
+    wall_right_attached  = set(i for i in range(K) if i != lr_idx and bx1 - float(boxes[i][2]) <= WALL_TOL)
+    wall_top_attached    = set(i for i in range(K) if i != lr_idx and float(boxes[i][1]) - by0 <= WALL_TOL)
+    wall_bottom_attached = set(i for i in range(K) if i != lr_idx and by1 - float(boxes[i][3]) <= WALL_TOL)
+    wall_attached_all    = wall_left_attached | wall_right_attached | wall_top_attached | wall_bottom_attached
+    print(f"  [EXPAND] Wall-attached rooms: {sorted(wall_attached_all)}")
+
     moved_rooms = set()   # rooms fixed after being pushed in a previous pass
     MAX_PASSES = 20
     for pass_num in range(1, MAX_PASSES + 1):
-        prev_lr    = boxes[lr_idx].copy()
-        pass_start = boxes.copy()           # snapshot to detect which rooms move this pass
+        prev_lr      = boxes[lr_idx].copy()
+        pass_blocked = set()   # rooms that appeared in any blocking set this pass
         print(f"  [EXPAND] === PASS {pass_num} (fixed={sorted(moved_rooms)}) ===")
 
         for direction in ('left', 'right', 'top', 'bottom'):
@@ -490,6 +498,7 @@ def expand_living_room(boxes, types, boundary):
                     and boxes[i][2] <= lx0
                     and min(boxes[i][3], ly1) - max(boxes[i][1], ly0) > 0
                 ]
+                pass_blocked.update(blocking)
                 print(f"  [EXPAND] blocking={blocking}")
                 if not blocking:
                     print(f"  [EXPAND] no blockers → LR.x0 = {bx0}")
@@ -512,6 +521,43 @@ def expand_living_room(boxes, types, boundary):
                     new_x0 = max(placed[i] + ws[i] for i in srt)
                     print(f"  [EXPAND] LR.x0: {lx0} → {new_x0}")
                     boxes[lr_idx][0] = new_x0
+                # Straddle push: rooms that partially cross LR's new left edge move with it
+                lx0_now = float(boxes[lr_idx][0])
+                for i in sorted(
+                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
+                     and i not in pass_blocked
+                     and i not in wall_attached_all
+                     and boxes[i][0] < lx0_now < boxes[i][2]
+                     and min(boxes[i][3], float(boxes[lr_idx][3])) - max(boxes[i][1], float(boxes[lr_idx][1])) > 0],
+                    key=lambda i: boxes[i][0]
+                ):
+                    w = float(boxes[i][2] - boxes[i][0])
+                    pos = bx0
+                    for j in range(K):
+                        if j == i or j == lr_idx:
+                            continue
+                        if boxes[j][0] < boxes[i][0]:
+                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
+                                pos = max(pos, boxes[j][2])
+                    boxes[i][0] = pos
+                    boxes[i][2] = pos + w
+                    pass_blocked.add(i)
+                    print(f"  [EXPAND]   straddle-left room {i} → {boxes[i].tolist()}")
+                # Post-straddle advance: re-check if LR.x0 can advance into the vacated space
+                post_remaining = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms and i not in pass_blocked
+                    and float(boxes[i][2]) <= float(boxes[lr_idx][0])
+                    and min(float(boxes[i][3]), float(boxes[lr_idx][3])) - max(float(boxes[i][1]), float(boxes[lr_idx][1])) > 0
+                ]
+                if not post_remaining:
+                    print(f"  [EXPAND]   post-straddle left: no blockers → LR.x0 = {bx0}")
+                    boxes[lr_idx][0] = bx0
+                else:
+                    post_x0 = max(float(boxes[i][2]) for i in post_remaining)
+                    if post_x0 < float(boxes[lr_idx][0]):
+                        print(f"  [EXPAND]   post-straddle left: LR.x0 {float(boxes[lr_idx][0])} → {post_x0}")
+                        boxes[lr_idx][0] = post_x0
 
             elif direction == 'right':
                 blocking = [
@@ -520,6 +566,7 @@ def expand_living_room(boxes, types, boundary):
                     and boxes[i][0] >= lx1
                     and min(boxes[i][3], ly1) - max(boxes[i][1], ly0) > 0
                 ]
+                pass_blocked.update(blocking)
                 print(f"  [EXPAND] blocking={blocking}")
                 if not blocking:
                     print(f"  [EXPAND] no blockers → LR.x1 = {bx1}")
@@ -542,6 +589,43 @@ def expand_living_room(boxes, types, boundary):
                     new_x1 = min(placed[i] - ws[i] for i in srt)
                     print(f"  [EXPAND] LR.x1: {lx1} → {new_x1}")
                     boxes[lr_idx][2] = new_x1
+                # Straddle push: rooms that partially cross LR's new right edge move with it
+                lx1_now = float(boxes[lr_idx][2])
+                for i in sorted(
+                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
+                     and i not in pass_blocked
+                     and i not in wall_attached_all
+                     and boxes[i][0] < lx1_now < boxes[i][2]
+                     and min(boxes[i][3], float(boxes[lr_idx][3])) - max(boxes[i][1], float(boxes[lr_idx][1])) > 0],
+                    key=lambda i: -boxes[i][2]
+                ):
+                    w = float(boxes[i][2] - boxes[i][0])
+                    pos = bx1
+                    for j in range(K):
+                        if j == i or j == lr_idx:
+                            continue
+                        if boxes[j][2] > boxes[i][2]:
+                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
+                                pos = min(pos, boxes[j][0])
+                    boxes[i][2] = pos
+                    boxes[i][0] = pos - w
+                    pass_blocked.add(i)
+                    print(f"  [EXPAND]   straddle-right room {i} → {boxes[i].tolist()}")
+                # Post-straddle advance: re-check if LR.x1 can advance into the vacated space
+                post_remaining = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms and i not in pass_blocked
+                    and float(boxes[i][0]) >= float(boxes[lr_idx][2])
+                    and min(float(boxes[i][3]), float(boxes[lr_idx][3])) - max(float(boxes[i][1]), float(boxes[lr_idx][1])) > 0
+                ]
+                if not post_remaining:
+                    print(f"  [EXPAND]   post-straddle right: no blockers → LR.x1 = {bx1}")
+                    boxes[lr_idx][2] = bx1
+                else:
+                    post_x1 = min(float(boxes[i][0]) for i in post_remaining)
+                    if post_x1 > float(boxes[lr_idx][2]):
+                        print(f"  [EXPAND]   post-straddle right: LR.x1 {float(boxes[lr_idx][2])} → {post_x1}")
+                        boxes[lr_idx][2] = post_x1
 
             elif direction == 'top':
                 blocking = [
@@ -550,6 +634,7 @@ def expand_living_room(boxes, types, boundary):
                     and boxes[i][3] <= ly0
                     and min(boxes[i][2], lx1) - max(boxes[i][0], lx0) > 0
                 ]
+                pass_blocked.update(blocking)
                 print(f"  [EXPAND] blocking={blocking}")
                 if not blocking:
                     print(f"  [EXPAND] no blockers → LR.y0 = {by0}")
@@ -572,6 +657,43 @@ def expand_living_room(boxes, types, boundary):
                     new_y0 = max(placed[i] + hs[i] for i in srt)
                     print(f"  [EXPAND] LR.y0: {ly0} → {new_y0}")
                     boxes[lr_idx][1] = new_y0
+                # Straddle push: rooms that partially cross LR's new top edge move with it
+                ly0_now = float(boxes[lr_idx][1])
+                for i in sorted(
+                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
+                     and i not in pass_blocked
+                     and i not in wall_attached_all
+                     and boxes[i][1] < ly0_now < boxes[i][3]
+                     and min(boxes[i][2], float(boxes[lr_idx][2])) - max(boxes[i][0], float(boxes[lr_idx][0])) > 0],
+                    key=lambda i: boxes[i][1]
+                ):
+                    h = float(boxes[i][3] - boxes[i][1])
+                    pos = by0
+                    for j in range(K):
+                        if j == i or j == lr_idx:
+                            continue
+                        if boxes[j][1] < boxes[i][1]:
+                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
+                                pos = max(pos, boxes[j][3])
+                    boxes[i][1] = pos
+                    boxes[i][3] = pos + h
+                    pass_blocked.add(i)
+                    print(f"  [EXPAND]   straddle-top room {i} → {boxes[i].tolist()}")
+                # Post-straddle advance: re-check if LR.y0 can advance into the vacated space
+                post_remaining = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms and i not in pass_blocked
+                    and float(boxes[i][3]) <= float(boxes[lr_idx][1])
+                    and min(float(boxes[i][2]), float(boxes[lr_idx][2])) - max(float(boxes[i][0]), float(boxes[lr_idx][0])) > 0
+                ]
+                if not post_remaining:
+                    print(f"  [EXPAND]   post-straddle top: no blockers → LR.y0 = {by0}")
+                    boxes[lr_idx][1] = by0
+                else:
+                    post_y0 = max(float(boxes[i][3]) for i in post_remaining)
+                    if post_y0 < float(boxes[lr_idx][1]):
+                        print(f"  [EXPAND]   post-straddle top: LR.y0 {float(boxes[lr_idx][1])} → {post_y0}")
+                        boxes[lr_idx][1] = post_y0
 
             elif direction == 'bottom':
                 blocking = [
@@ -580,6 +702,7 @@ def expand_living_room(boxes, types, boundary):
                     and boxes[i][1] >= ly1
                     and min(boxes[i][2], lx1) - max(boxes[i][0], lx0) > 0
                 ]
+                pass_blocked.update(blocking)
                 print(f"  [EXPAND] blocking={blocking}")
                 if not blocking:
                     print(f"  [EXPAND] no blockers → LR.y1 = {by1}")
@@ -602,11 +725,49 @@ def expand_living_room(boxes, types, boundary):
                     new_y1 = min(placed[i] - hs[i] for i in srt)
                     print(f"  [EXPAND] LR.y1: {ly1} → {new_y1}")
                     boxes[lr_idx][3] = new_y1
+                # Straddle push: rooms that partially cross LR's new bottom edge move with it
+                ly1_now = float(boxes[lr_idx][3])
+                for i in sorted(
+                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
+                     and i not in pass_blocked
+                     and i not in wall_attached_all
+                     and boxes[i][1] < ly1_now < boxes[i][3]
+                     and min(boxes[i][2], float(boxes[lr_idx][2])) - max(boxes[i][0], float(boxes[lr_idx][0])) > 0],
+                    key=lambda i: -boxes[i][3]
+                ):
+                    h = float(boxes[i][3] - boxes[i][1])
+                    pos = by1
+                    for j in range(K):
+                        if j == i or j == lr_idx:
+                            continue
+                        if boxes[j][3] > boxes[i][3]:
+                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
+                                pos = min(pos, boxes[j][1])
+                    boxes[i][3] = pos
+                    boxes[i][1] = pos - h
+                    pass_blocked.add(i)
+                    print(f"  [EXPAND]   straddle-bottom room {i} → {boxes[i].tolist()}")
+                # Post-straddle advance: re-check if LR.y1 can advance into the vacated space
+                post_remaining = [
+                    i for i in range(K) if i != lr_idx
+                    and i not in moved_rooms and i not in pass_blocked
+                    and float(boxes[i][1]) >= float(boxes[lr_idx][3])
+                    and min(float(boxes[i][2]), float(boxes[lr_idx][2])) - max(float(boxes[i][0]), float(boxes[lr_idx][0])) > 0
+                ]
+                if not post_remaining:
+                    print(f"  [EXPAND]   post-straddle bottom: no blockers → LR.y1 = {by1}")
+                    boxes[lr_idx][3] = by1
+                else:
+                    post_y1 = min(float(boxes[i][1]) for i in post_remaining)
+                    if post_y1 > float(boxes[lr_idx][3]):
+                        print(f"  [EXPAND]   post-straddle bottom: LR.y1 {float(boxes[lr_idx][3])} → {post_y1}")
+                        boxes[lr_idx][3] = post_y1
 
-        # Rooms that moved this pass become fixed for all subsequent passes
-        for i in range(K):
-            if i != lr_idx and not np.allclose(boxes[i], pass_start[i]):
-                moved_rooms.add(i)
+        # Every room that was a blocker this pass becomes fixed for subsequent passes,
+        # whether it physically moved or was already at the boundary wall.
+        # Wall-attached rooms are never promoted — they remain permanent blockers forever.
+        moved_rooms |= pass_blocked
+        moved_rooms -= wall_attached_all
 
         if np.allclose(boxes[lr_idx], prev_lr):
             print(f"  [EXPAND] Converged after {pass_num} pass(es)")

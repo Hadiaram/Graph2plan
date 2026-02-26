@@ -27,6 +27,10 @@ tensorboardX==2.6.2.2
 # Progress Bars & CLI
 tqdm==4.65.0
 
+# DXF Export (Interface/Houseweb/dxf_export.py)
+ezdxf
+shapely
+
 # Note: This requirements.txt is for the Network training script.
 # For CUDA support, install PyTorch with CUDA 12.1:
 # pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121

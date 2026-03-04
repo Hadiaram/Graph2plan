@@ -1120,6 +1120,251 @@ def ExpandLivingRoom(request):
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
+def FillWallGaps(request):
+    global last_fp_data, last_testname
+
+    if last_fp_data is None:
+        return HttpResponse(
+            json.dumps({'error': 'No layout generated yet. Click Generate first.'}),
+            content_type="application/json",
+            status=400,
+        )
+
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import fill_wall_gaps, boxes_to_boundaries
+
+    print("[FILL GAPS] Running wall gap fill pass...")
+    filled_boxes = fill_wall_gaps(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.boundary,
+    )
+    print("[FILL GAPS] Done.")
+
+    last_fp_data.newBox    = filled_boxes
+    last_fp_data.rBoundary = boxes_to_boundaries(filled_boxes)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    # Build response in the same format as OptimizeLayout / AdjustGraph
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    K = len(filled_boxes)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in filled_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
+def SnapRooms(request):
+    global last_fp_data, last_testname
+
+    if last_fp_data is None:
+        return HttpResponse(
+            json.dumps({'error': 'No layout generated yet. Click Generate first.'}),
+            content_type="application/json",
+            status=400,
+        )
+
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import snap_single_edge_rooms, boxes_to_boundaries
+
+    print("[SNAP ROOMS] Running snap pass...")
+    snapped_boxes = snap_single_edge_rooms(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.boundary,
+        max_gap=80.0,
+    )
+    print("[SNAP ROOMS] Done.")
+
+    last_fp_data.newBox    = snapped_boxes
+    last_fp_data.rBoundary = boxes_to_boundaries(snapped_boxes)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    K = len(snapped_boxes)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in snapped_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
+def FillLivingRoom(request):
+    global last_fp_data, last_testname
+
+    if last_fp_data is None:
+        return HttpResponse(
+            json.dumps({'error': 'No layout generated yet. Click Generate first.'}),
+            content_type="application/json",
+            status=400,
+        )
+
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import fill_living_room, boxes_to_boundaries
+
+    print("[FILL LR] Running living room fill pass...")
+    filled_boxes = fill_living_room(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.boundary,
+    )
+    print("[FILL LR] Done.")
+
+    last_fp_data.newBox    = filled_boxes
+    last_fp_data.rBoundary = boxes_to_boundaries(filled_boxes)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    K = len(filled_boxes)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in filled_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
 def RelBox(request):
     id = request.GET.get("selectRect")
     print(id)
@@ -1832,6 +2077,208 @@ def Export_DXF(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+def Log_Boundaries(request):
+    """
+    Boundary diagnostic endpoint - triggered by the Log Boundary button.
+
+    Logs all boundary point coordinates and checks each room box's position
+    relative to the boundary polygon (extents check + Shapely escape area).
+
+    GET parameters:
+        - userRoomID: Floor plan identifier (e.g., "14926")
+
+    Returns:
+        JSON with boundary_points, wall_segments, and per-room relationship info.
+        Full detail is also printed to the server console.
+    """
+    userRoomID = request.GET.get("userRoomID")
+    if not userRoomID:
+        return JsonResponse({"success": False, "error": "userRoomID parameter required"}, status=400)
+
+    try:
+        mat_path = f"./static/{userRoomID}.mat"
+        if not os.path.exists(mat_path):
+            return JsonResponse({"success": False,
+                                 "error": f"Floor plan {userRoomID}.mat not found in static directory"}, status=404)
+
+        print(f"\n[Log Boundaries] {'='*60}")
+        print(f"[Log Boundaries] Floor plan: {userRoomID}")
+        data = sio.loadmat(mat_path)
+        fp_data = data['data'][0, 0]
+        available_fields = fp_data.dtype.names
+        print(f"[Log Boundaries] Available fields: {available_fields}")
+
+        # --- Load boundary ---
+        if 'boundary' not in available_fields:
+            return JsonResponse({"success": False, "error": "No 'boundary' field in .mat file"})
+        boundary = np.array(fp_data['boundary'])
+        print(f"[Log Boundaries] Boundary shape: {boundary.shape}")
+
+        # --- Load boxes and room types ---
+        box_field = 'newBox' if 'newBox' in available_fields else (
+                    'refineBox' if 'refineBox' in available_fields else 'gtBox')
+        boxes_raw = np.array(fp_data[box_field]) if box_field in available_fields else None
+        rtype_raw = np.array(fp_data['rType']).flatten() if 'rType' in available_fields else None
+
+        room_type_names = {
+            0: 'LivingRoom', 1: 'MasterRoom', 2: 'Kitchen', 3: 'Bathroom',
+            4: 'DiningRoom', 5: 'ChildRoom', 6: 'StudyRoom', 7: 'SecondRoom',
+            8: 'GuestRoom', 9: 'Balcony', 10: 'Entrance', 11: 'Storage',
+            12: 'Wall-in', 13: 'External', 14: 'ExteriorWall', 15: 'FrontDoor',
+            16: 'InteriorWall', 17: 'InteriorDoor',
+        }
+        direction_names = {0: "right →", 1: "up ↑", 2: "left ←", 3: "down ↓"}
+
+        # --- Parse boundary points ---
+        coords = boundary[:, :2]
+        boundary_points = []
+        for idx in range(len(boundary)):
+            pt = {"index": idx,
+                  "x": round(float(coords[idx, 0]), 2),
+                  "y": round(float(coords[idx, 1]), 2)}
+            if boundary.shape[1] >= 3:
+                d = int(boundary[idx, 2])
+                pt["direction_code"] = d
+                pt["direction"] = direction_names.get(d, str(d))
+            if boundary.shape[1] >= 4:
+                pt["is_new"] = int(boundary[idx, 3])
+            boundary_points.append(pt)
+            print(f"[Log Boundaries]   pt[{idx:2d}]  x={pt['x']:7.2f}  y={pt['y']:7.2f}"
+                  + (f"  dir={pt['direction']}" if "direction" in pt else "")
+                  + (f"  isNew={pt['is_new']}"  if "is_new"   in pt else ""))
+
+        bnd_min_x = float(np.min(coords[:, 0]))
+        bnd_max_x = float(np.max(coords[:, 0]))
+        bnd_min_y = float(np.min(coords[:, 1]))
+        bnd_max_y = float(np.max(coords[:, 1]))
+        print(f"[Log Boundaries] Extents: x=[{bnd_min_x:.2f}, {bnd_max_x:.2f}]  "
+              f"y=[{bnd_min_y:.2f}, {bnd_max_y:.2f}]")
+
+        # --- Wall segments (point[i] → point[i+1]) ---
+        n_pts = len(coords)
+        wall_segments = []
+        print(f"\n[Log Boundaries] Wall segments ({n_pts}):")
+        for idx in range(n_pts):
+            next_idx = (idx + 1) % n_pts
+            x1w, y1w = float(coords[idx,       0]), float(coords[idx,       1])
+            x2w, y2w = float(coords[next_idx,  0]), float(coords[next_idx,  1])
+            length = round(float(np.sqrt((x2w - x1w)**2 + (y2w - y1w)**2)), 2)
+            wall = {"index": idx,
+                    "x1": round(x1w, 2), "y1": round(y1w, 2),
+                    "x2": round(x2w, 2), "y2": round(y2w, 2),
+                    "length": length}
+            if boundary.shape[1] >= 3:
+                d = int(boundary[idx, 2])
+                wall["direction_code"] = d
+                wall["direction"] = direction_names.get(d, str(d))
+            wall_segments.append(wall)
+            print(f"[Log Boundaries]   wall[{idx:2d}]  "
+                  f"({x1w:.2f},{y1w:.2f}) → ({x2w:.2f},{y2w:.2f})  "
+                  f"len={length:.2f}"
+                  + (f"  dir={wall['direction']}" if "direction" in wall else ""))
+
+        # --- Shapely polygon (optional, for escape area) ---
+        bnd_poly = None
+        has_shapely = False
+        try:
+            from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box
+            bnd_poly = ShapelyPolygon(coords.tolist())
+            if not bnd_poly.is_valid:
+                bnd_poly = bnd_poly.buffer(0)
+            has_shapely = True
+        except ImportError:
+            pass
+
+        # --- Parse rooms ---
+        rooms = []
+        if boxes_raw is not None and rtype_raw is not None:
+            print(f"\n[Log Boundaries] Rooms ({len(boxes_raw)}):")
+            for i in range(len(boxes_raw)):
+                row = boxes_raw[i]
+                x1, y1, x2, y2 = float(row[0]), float(row[1]), float(row[2]), float(row[3])
+                rtype = int(rtype_raw[i]) if i < len(rtype_raw) else -1
+                rname = room_type_names.get(rtype, f"Unknown({rtype})")
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+                # Nearest boundary point
+                dists       = np.sqrt((coords[:, 0] - cx)**2 + (coords[:, 1] - cy)**2)
+                nearest_idx  = int(np.argmin(dists))
+                nearest_dist = round(float(dists[nearest_idx]), 2)
+
+                # Closest wall segment (point-to-segment distance from room center)
+                min_wall_dist    = float('inf')
+                closest_wall_idx = 0
+                for w in wall_segments:
+                    wx1, wy1, wx2, wy2 = w['x1'], w['y1'], w['x2'], w['y2']
+                    dx, dy = wx2 - wx1, wy2 - wy1
+                    seg_len_sq = dx * dx + dy * dy
+                    if seg_len_sq == 0:
+                        wdist = float(np.sqrt((cx - wx1)**2 + (cy - wy1)**2))
+                    else:
+                        t = max(0.0, min(1.0, ((cx - wx1) * dx + (cy - wy1) * dy) / seg_len_sq))
+                        wdist = float(np.sqrt((cx - (wx1 + t * dx))**2 + (cy - (wy1 + t * dy))**2))
+                    if wdist < min_wall_dist:
+                        min_wall_dist    = wdist
+                        closest_wall_idx = w['index']
+
+                closest_wall      = wall_segments[closest_wall_idx]
+                closest_wall_name = f"Wall[{closest_wall_idx}]"
+                if 'direction' in closest_wall:
+                    closest_wall_name += f" {closest_wall['direction']}"
+                closest_wall_dist = round(min_wall_dist, 2)
+
+                room_info = {
+                    "index": i, "type": rtype, "type_name": rname,
+                    "x1": round(x1, 2), "y1": round(y1, 2),
+                    "x2": round(x2, 2), "y2": round(y2, 2),
+                    "center_x": round(cx, 2), "center_y": round(cy, 2),
+                    "nearest_boundary_point_idx":  nearest_idx,
+                    "nearest_boundary_point_dist": nearest_dist,
+                    "closest_wall_idx":  closest_wall_idx,
+                    "closest_wall_name": closest_wall_name,
+                    "closest_wall_dist": closest_wall_dist,
+                    "inside_boundary_extents": (x1 >= bnd_min_x and x2 <= bnd_max_x and
+                                                y1 >= bnd_min_y and y2 <= bnd_max_y),
+                }
+
+                if has_shapely:
+                    room_poly   = shapely_box(x1, y1, x2, y2)
+                    outside     = room_poly.difference(bnd_poly)
+                    escape_area = round(float(outside.area), 2) if not outside.is_empty else 0.0
+                    room_info["escape_area_px2"]       = escape_area
+                    room_info["fully_inside_boundary"] = escape_area < 0.01
+
+                rooms.append(room_info)
+                print(f"[Log Boundaries]   [{i}] {rname:12s} "
+                      f"({x1:.1f},{y1:.1f})-({x2:.1f},{y2:.1f})  "
+                      f"nearest_bnd={nearest_idx} dist={nearest_dist:.2f}  "
+                      f"closest_wall={closest_wall_name} wall_dist={closest_wall_dist:.2f}"
+                      + (f"  escape={room_info['escape_area_px2']:.2f}px²" if has_shapely else "")
+                      + ("  ⚠ OUTSIDE extents" if not room_info["inside_boundary_extents"] else ""))
+
+        print(f"[Log Boundaries] {'='*60}\n")
+
+        return JsonResponse({
+            "success": True,
+            "floor_plan_id": userRoomID,
+            "boundary_point_count": len(boundary_points),
+            "boundary_extents": {
+                "x_min": round(bnd_min_x, 2), "x_max": round(bnd_max_x, 2),
+                "y_min": round(bnd_min_y, 2), "y_max": round(bnd_max_y, 2),
+            },
+            "boundary_points": boundary_points,
+            "wall_segments":   wall_segments,
+            "room_count": len(rooms),
+            "rooms": rooms,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"success": False, "error": str(e),
+                             "traceback": traceback.format_exc()}, status=500)
 
 
 if __name__ == "__main__":

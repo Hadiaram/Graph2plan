@@ -14,6 +14,8 @@ var startPoint = [-1, -1, -1, -1, -1];
 var RelRectvalue = [];
 var rightDeleteMode = false; // Track delete mode for right-side interface
 var deletedRightRooms = []; // Track deleted room IDs
+var measureMode = false;       // Pixel ruler: active when true
+var measurePoint1 = null;      // First clicked point {x, y} in SVG coords
 $(document).ready(function () {
     start();//执行函数
     isTrans = 0;
@@ -52,6 +54,22 @@ function start() {
     }
 
     $('#LeftGraphSVG').on('mousedown', function (e) {
+
+        // Pixel ruler takes priority — don't place graph nodes while measuring
+        if (measureMode) {
+            // Use a child element's getScreenCTM() — child CTMs reliably include
+            // the parent SVG's transform="scale(1.5)" attribute, whereas the root
+            // SVG element's own getScreenCTM() may omit its own transform in some
+            // browsers, causing a scale error.
+            var layoutSVG = document.getElementById('LeftLayoutSVG');
+            var ref = layoutSVG.querySelector('rect') || layoutSVG;
+            var pt = layoutSVG.createSVGPoint();
+            pt.x = e.clientX;
+            pt.y = e.clientY;
+            var svgCoords = pt.matrixTransform(ref.getScreenCTM().inverse());
+            handleMeasureClick(svgCoords.x, svgCoords.y);
+            return;
+        }
 
         console.log("Left!");
 
@@ -183,6 +201,69 @@ function clearHighLight() {
 function rect_clearHighLight() {
     var rects = d3.select("body").select("#LeftLayoutSVG").selectAll("rect").attr("stroke-width", 4);
 
+}
+
+function handleMeasureClick(x, y) {
+    var svg = d3.select("#LeftLayoutSVG");
+
+    if (!measurePoint1) {
+        // First click — place a dot and wait for second click
+        measurePoint1 = {x: x, y: y};
+
+        // Clear any previous single-point marker
+        svg.selectAll(".measureOverlay").remove();
+
+        svg.append("circle")
+            .attr("class", "measureOverlay")
+            .attr("cx", x).attr("cy", y).attr("r", 2.5)
+            .attr("fill", "#E65100")
+            .attr("stroke", "white").attr("stroke-width", "0.5");
+
+    } else {
+        // Second click — draw line, dots, and distance label
+        var x1 = measurePoint1.x, y1 = measurePoint1.y;
+        var x2 = x, y2 = y;
+        var dist = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+        var label = dist.toFixed(1) + " px";
+
+        svg.selectAll(".measureOverlay").remove();
+
+        // Line between the two points
+        svg.append("line")
+            .attr("class", "measureOverlay")
+            .attr("x1", x1).attr("y1", y1)
+            .attr("x2", x2).attr("y2", y2)
+            .attr("stroke", "#E65100").attr("stroke-width", "1.5")
+            .attr("stroke-dasharray", "4,2");
+
+        // Endpoint dots
+        [{x: x1, y: y1}, {x: x2, y: y2}].forEach(function(p) {
+            svg.append("circle")
+                .attr("class", "measureOverlay")
+                .attr("cx", p.x).attr("cy", p.y).attr("r", 2.5)
+                .attr("fill", "#E65100")
+                .attr("stroke", "white").attr("stroke-width", "0.5");
+        });
+
+        // Distance label at midpoint
+        var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        svg.append("text")
+            .attr("class", "measureOverlay")
+            .attr("x", mx).attr("y", my - 4)
+            .attr("text-anchor", "middle")
+            .attr("font-size", "8")
+            .attr("font-weight", "bold")
+            .attr("fill", "#E65100")
+            .attr("stroke", "white").attr("stroke-width", "0.8")
+            .attr("paint-order", "stroke")
+            .text(label);
+
+        console.log("[Measure] (" + x1.toFixed(1) + ", " + y1.toFixed(1) + ") → (" +
+                    x2.toFixed(1) + ", " + y2.toFixed(1) + ") = " + label);
+
+        // Reset so the next click starts a new measurement
+        measurePoint1 = null;
+    }
 }
 
 function selectRoomType(roomType, id) {
@@ -521,6 +602,11 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
     if (expandBtn) {
         expandBtn.textContent = "Expand LR";
         expandBtn.style.backgroundColor = "#e65100";
+    }
+    var fillGapsBtn2 = document.getElementById("fillWallGapsButton");
+    if (fillGapsBtn2) {
+        fillGapsBtn2.textContent = "Fill Gaps";
+        fillGapsBtn2.style.backgroundColor = "#388E3C";
     }
 
     d3.select('body').select('#LeftBaseSVG').selectAll('rect').remove();
@@ -1086,6 +1172,11 @@ function CreateLeftFloorPlan(boxes, exterior, door) {
         expandBtn.textContent = "Expand LR";
         expandBtn.style.backgroundColor = "#e65100";
     }
+    var fillGapsBtn2 = document.getElementById("fillWallGapsButton");
+    if (fillGapsBtn2) {
+        fillGapsBtn2.textContent = "Fill Gaps";
+        fillGapsBtn2.style.backgroundColor = "#388E3C";
+    }
 
     // Clear existing floor plan
     d3.select('#LeftLayoutSVG').selectAll('rect').remove();
@@ -1252,6 +1343,16 @@ function CreateLeftGraph(rooms, roomID) {
                 if (expandLRBtn) { expandLRBtn.style.display = "block"; }
                 var dxfBtn = document.getElementById("exportDXFButton");
                 if (dxfBtn) { dxfBtn.style.display = "block"; }
+                var fillGapsBtn = document.getElementById("fillWallGapsButton");
+                if (fillGapsBtn) { fillGapsBtn.style.display = "block"; }
+                var snapRoomsBtn = document.getElementById("snapRoomsButton");
+                if (snapRoomsBtn) { snapRoomsBtn.style.display = "block"; }
+                var fillLRBtn = document.getElementById("fillLivingRoomButton");
+                if (fillLRBtn) { fillLRBtn.style.display = "block"; }
+                var logBndBtn = document.getElementById("logBoundariesButton");
+                if (logBndBtn) { logBndBtn.style.display = "block"; }
+                var measureBtn = document.getElementById("measureButton");
+                if (measureBtn) { measureBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1320,6 +1421,208 @@ function CreateLeftGraph(rooms, roomID) {
                 alert("Expansion failed. Check the server console for details.");
                 btn.textContent = "Expand LR";
                 btn.style.backgroundColor = "#e65100";
+            });
+        };
+
+        // Fill Wall Gaps button handler
+        document.getElementById("fillWallGapsButton").onclick = function () {
+            var btn = document.getElementById("fillWallGapsButton");
+            btn.textContent = "Filling…";
+            btn.style.backgroundColor = "#616161";
+
+            $.get("/index/FillWallGaps/", {}, function (ret) {
+                console.log("✅ [FRONTEND] FillWallGaps response received");
+                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
+                               ret["windows"], ret["indoor"], ret["windowsline"]);
+                btn.textContent = "Fill Gaps";
+                btn.style.backgroundColor = "#388E3C";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ [FRONTEND] FillWallGaps FAILED:", xhr.responseText);
+                alert("Fill gaps failed. Check the server console for details.");
+                btn.textContent = "Fill Gaps";
+                btn.style.backgroundColor = "#388E3C";
+            });
+        };
+
+        // Snap Rooms button handler
+        document.getElementById("snapRoomsButton").onclick = function () {
+            var btn = document.getElementById("snapRoomsButton");
+            btn.textContent = "Snapping…";
+            btn.style.backgroundColor = "#616161";
+
+            $.get("/index/SnapRooms/", {}, function (ret) {
+                console.log("✅ [FRONTEND] SnapRooms response received");
+                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
+                               ret["windows"], ret["indoor"], ret["windowsline"]);
+                btn.textContent = "Snap Rooms";
+                btn.style.backgroundColor = "#6A1B9A";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ [FRONTEND] SnapRooms FAILED:", xhr.responseText);
+                alert("Snap rooms failed. Check the server console for details.");
+                btn.textContent = "Snap Rooms";
+                btn.style.backgroundColor = "#6A1B9A";
+            });
+        };
+
+        // Fill Living Room button handler
+        document.getElementById("fillLivingRoomButton").onclick = function () {
+            var btn = document.getElementById("fillLivingRoomButton");
+            btn.textContent = "Filling…";
+            btn.style.backgroundColor = "#616161";
+
+            $.get("/index/FillLivingRoom/", {}, function (ret) {
+                console.log("✅ [FRONTEND] FillLivingRoom response received");
+                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
+                               ret["windows"], ret["indoor"], ret["windowsline"]);
+                btn.textContent = "Fill LR";
+                btn.style.backgroundColor = "#BF360C";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ [FRONTEND] FillLivingRoom FAILED:", xhr.responseText);
+                alert("Fill LR failed. Check the server console for details.");
+                btn.textContent = "Fill LR";
+                btn.style.backgroundColor = "#BF360C";
+            });
+        };
+
+        // Pixel ruler: Measure button toggle handler
+        document.getElementById("measureButton").onclick = function () {
+            measureMode = !measureMode;
+            measurePoint1 = null;
+
+            var btn = document.getElementById("measureButton");
+            var svgEl = document.getElementById('LeftGraphSVG');
+
+            if (measureMode) {
+                btn.style.backgroundColor = "#E65100";
+                btn.textContent = "📏 Measuring…";
+                svgEl.style.cursor = "crosshair";
+            } else {
+                btn.style.backgroundColor = "#795548";
+                btn.textContent = "📏 Measure";
+                svgEl.style.cursor = "";
+                d3.select("#LeftLayoutSVG").selectAll(".measureOverlay").remove();
+            }
+        };
+
+        // Log Boundary button handler
+        document.getElementById("logBoundariesButton").onclick = function () {
+            var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
+            var hsname;
+            if (arr = document.cookie.match(reg))
+                hsname = arr[2];
+
+            if (!hsname) {
+                alert("Please load a boundary file first!");
+                return;
+            }
+
+            var userRoomID = hsname.split(".")[0];
+
+            var logBtn = document.getElementById("logBoundariesButton");
+            var originalText = logBtn.innerHTML;
+            logBtn.innerHTML = "⏳ Loading...";
+            logBtn.style.backgroundColor = "#757575";
+            logBtn.style.cursor = "wait";
+
+            console.log("[Log Boundary] Requesting boundary log for:", userRoomID);
+
+            $.get("/index/Log_Boundaries/", { 'userRoomID': userRoomID }, function (data) {
+                logBtn.innerHTML = originalText;
+                logBtn.style.backgroundColor = "#00897B";
+                logBtn.style.cursor = "pointer";
+
+                if (data.success) {
+                    // Print full detail to browser console
+                    console.log("[Log Boundary] ============================================================");
+                    console.log("[Log Boundary] Floor plan:", data.floor_plan_id);
+                    console.log("[Log Boundary] Boundary extents:", data.boundary_extents);
+                    console.log("[Log Boundary] Boundary points (" + data.boundary_point_count + "):");
+                    data.boundary_points.forEach(function(pt) {
+                        var line = "  pt[" + pt.index + "]  x=" + pt.x + "  y=" + pt.y;
+                        if (pt.direction) line += "  dir=" + pt.direction;
+                        if (pt.is_new !== undefined) line += "  isNew=" + pt.is_new;
+                        console.log("[Log Boundary]" + line);
+                    });
+                    console.log("[Log Boundary] Wall segments (" + data.wall_segments.length + "):");
+                    data.wall_segments.forEach(function(w) {
+                        var line = "  wall[" + w.index + "]  (" + w.x1 + "," + w.y1 + ") → (" + w.x2 + "," + w.y2 + ")  len=" + w.length;
+                        if (w.direction) line += "  dir=" + w.direction;
+                        console.log("[Log Boundary]" + line);
+                    });
+                    console.log("[Log Boundary] Rooms (" + data.room_count + "):");
+                    data.rooms.forEach(function(r) {
+                        var line = "  [" + r.index + "] " + r.type_name +
+                                   "  (" + r.x1 + "," + r.y1 + ")-(" + r.x2 + "," + r.y2 + ")" +
+                                   "  closest_wall=" + r.closest_wall_name +
+                                   "  wall_dist=" + r.closest_wall_dist;
+                        if (r.escape_area_px2 !== undefined)
+                            line += "  escape=" + r.escape_area_px2 + "px²";
+                        if (!r.inside_boundary_extents)
+                            line += "  ⚠ OUTSIDE extents";
+                        console.log("[Log Boundary]" + line);
+                    });
+                    console.log("[Log Boundary] ============================================================");
+
+                    // SVG overlay: wall labels + room-to-nearest-wall dashed lines
+                    d3.select("#LeftBaseSVG").selectAll(".logBndOverlay").remove();
+                    d3.select("#LeftLayoutSVG").selectAll(".logBndOverlay").remove();
+
+                    // Label each wall at its midpoint
+                    data.wall_segments.forEach(function(w) {
+                        var mx = (w.x1 + w.x2) / 2;
+                        var my = (w.y1 + w.y2) / 2;
+                        d3.select("#LeftBaseSVG").append("text")
+                            .attr("class", "logBndOverlay")
+                            .attr("x", mx).attr("y", my)
+                            .attr("text-anchor", "middle")
+                            .attr("dominant-baseline", "central")
+                            .attr("font-size", "6")
+                            .attr("fill", "#FF6D00")
+                            .attr("stroke", "white")
+                            .attr("stroke-width", "0.4")
+                            .attr("paint-order", "stroke")
+                            .text("W" + w.index);
+                    });
+
+                    // Dashed line from each room centre to nearest point on its closest wall
+                    data.rooms.forEach(function(r) {
+                        var cx = r.center_x, cy = r.center_y;
+                        var w = data.wall_segments[r.closest_wall_idx];
+                        var dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+                        var segLenSq = dx * dx + dy * dy;
+                        var t = segLenSq === 0 ? 0 :
+                            Math.max(0, Math.min(1, ((cx - w.x1) * dx + (cy - w.y1) * dy) / segLenSq));
+                        var px = w.x1 + t * dx, py = w.y1 + t * dy;
+                        d3.select("#LeftLayoutSVG").append("line")
+                            .attr("class", "logBndOverlay")
+                            .attr("x1", cx).attr("y1", cy)
+                            .attr("x2", px).attr("y2", py)
+                            .attr("stroke", "#FF6D00")
+                            .attr("stroke-width", "1")
+                            .attr("stroke-dasharray", "3,2");
+                    });
+
+                    var outsideCount = data.rooms.filter(function(r) { return !r.inside_boundary_extents; }).length;
+                    var escapeCount  = data.rooms.filter(function(r) { return r.escape_area_px2 !== undefined && r.escape_area_px2 > 0.01; }).length;
+
+                    alert("✅ Boundary Log Complete — see browser console for full detail\n\n" +
+                        "Floor plan: " + data.floor_plan_id + "\n" +
+                        "Boundary points: " + data.boundary_point_count + "\n" +
+                        "Extents: x=[" + data.boundary_extents.x_min + ", " + data.boundary_extents.x_max + "]" +
+                        "  y=[" + data.boundary_extents.y_min + ", " + data.boundary_extents.y_max + "]\n" +
+                        "Rooms: " + data.room_count +
+                        (outsideCount > 0 ? "\n⚠ " + outsideCount + " room(s) outside boundary extents" : "") +
+                        (escapeCount  > 0 ? "\n⚠ " + escapeCount  + " room(s) partially outside boundary polygon" : ""));
+                } else {
+                    console.error("[Log Boundary] Failed:", data.error);
+                    alert("❌ Log Boundary failed:\n" + data.error);
+                }
+            }).fail(function(xhr, status, error) {
+                logBtn.innerHTML = originalText;
+                logBtn.style.backgroundColor = "#00897B";
+                logBtn.style.cursor = "pointer";
+                console.error("[Log Boundary] Request failed:", xhr.responseText);
+                alert("❌ Log Boundary request failed:\n" + error);
             });
         };
 

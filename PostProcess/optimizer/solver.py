@@ -55,6 +55,27 @@ def _poly_x_range_at_y(vertices, y):
     return min(xs), max(xs)
 
 
+def _poly_y_range_at_x(vertices, x):
+    """
+    Vertical scan of a closed polygon at column x.
+    Returns (y_lo, y_hi) of the polygon interior, or None if x is outside.
+    vertices: list of [x, y] pairs (closed — last == first, or auto-closed).
+    """
+    ys = []
+    n = len(vertices)
+    for i in range(n - 1):
+        x1, y1 = float(vertices[i][0]),   float(vertices[i][1])
+        x2, y2 = float(vertices[i+1][0]), float(vertices[i+1][1])
+        if x1 == x2:
+            continue                          # vertical edge — skip
+        if min(x1, x2) < x <= max(x1, x2):
+            yi = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+            ys.append(yi)
+    if len(ys) < 2:
+        return None
+    return min(ys), max(ys)
+
+
 def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     """
     Run the CP-SAT layout optimizer.
@@ -492,276 +513,200 @@ def expand_living_room(boxes, types, boundary):
             print(f"  [EXPAND] --- {direction.upper()} --- LR now: [{lx0},{ly0},{lx1},{ly1}]")
 
             if direction == 'left':
-                blocking = [
+                # Unified blocking: rooms whose left edge is left of LR's left edge (outside OR straddling)
+                initial_blocking = [
                     i for i in range(K) if i != lr_idx
                     and i not in moved_rooms
-                    and boxes[i][2] <= lx0
-                    and min(boxes[i][3], ly1) - max(boxes[i][1], ly0) > 0
+                    and float(boxes[i][0]) < lx0
+                    and min(float(boxes[i][3]), ly1) - max(float(boxes[i][1]), ly0) > 0
                 ]
-                pass_blocked.update(blocking)
-                print(f"  [EXPAND] blocking={blocking}")
-                if not blocking:
+                print(f"  [EXPAND] blocking={initial_blocking}")
+                if not initial_blocking:
                     print(f"  [EXPAND] no blockers → LR.x0 = {bx0}")
                     boxes[lr_idx][0] = bx0
                 else:
-                    # Greedy compaction: sort outermost (smallest x0) first, pack toward bx0
-                    srt = sorted(blocking, key=lambda i: boxes[i][0])
-                    ws  = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
+                    push_chain = set(initial_blocking)
+                    frontier = list(initial_blocking)
+                    while frontier:
+                        ri = frontier.pop()
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain or j in moved_rooms or j in wall_attached_all:
+                                continue
+                            if (float(boxes[j][0]) < float(boxes[ri][0])
+                                    and min(float(boxes[j][3]), float(boxes[ri][3])) - max(float(boxes[j][1]), float(boxes[ri][1])) > 0):
+                                push_chain.add(j)
+                                frontier.append(j)
+                    srt = sorted(push_chain, key=lambda i: boxes[i][0])
+                    ws = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
+                    orig_lo = {i: float(boxes[i][0]) for i in srt}
                     placed = {}
                     for i in srt:
                         pos = bx0
                         for j in placed:
-                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
+                            if min(float(boxes[i][3]), float(boxes[j][3])) - max(float(boxes[i][1]), float(boxes[j][1])) > 0:
                                 pos = max(pos, placed[j] + ws[j])
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain:
+                                continue
+                            if (float(boxes[j][0]) < orig_lo[i]
+                                    and min(float(boxes[i][3]), float(boxes[j][3])) - max(float(boxes[i][1]), float(boxes[j][1])) > 0):
+                                pos = max(pos, float(boxes[j][2]))
                         placed[i] = pos
                     for i in srt:
                         boxes[i][0] = placed[i]
                         boxes[i][2] = placed[i] + ws[i]
                         print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
-                    new_x0 = max(placed[i] + ws[i] for i in srt)
+                    new_x0 = max(placed[i] + ws[i] for i in initial_blocking)
                     print(f"  [EXPAND] LR.x0: {lx0} → {new_x0}")
                     boxes[lr_idx][0] = new_x0
-                # Straddle push: rooms that partially cross LR's new left edge move with it
-                lx0_now = float(boxes[lr_idx][0])
-                for i in sorted(
-                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
-                     and i not in pass_blocked
-                     and i not in wall_attached_all
-                     and boxes[i][0] < lx0_now < boxes[i][2]
-                     and min(boxes[i][3], float(boxes[lr_idx][3])) - max(boxes[i][1], float(boxes[lr_idx][1])) > 0],
-                    key=lambda i: boxes[i][0]
-                ):
-                    w = float(boxes[i][2] - boxes[i][0])
-                    pos = bx0
-                    for j in range(K):
-                        if j == i or j == lr_idx:
-                            continue
-                        if boxes[j][0] < boxes[i][0]:
-                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
-                                pos = max(pos, boxes[j][2])
-                    boxes[i][0] = pos
-                    boxes[i][2] = pos + w
-                    pass_blocked.add(i)
-                    print(f"  [EXPAND]   straddle-left room {i} → {boxes[i].tolist()}")
-                # Post-straddle advance: re-check if LR.x0 can advance into the vacated space
-                post_remaining = [
-                    i for i in range(K) if i != lr_idx
-                    and i not in moved_rooms and i not in pass_blocked
-                    and float(boxes[i][2]) <= float(boxes[lr_idx][0])
-                    and min(float(boxes[i][3]), float(boxes[lr_idx][3])) - max(float(boxes[i][1]), float(boxes[lr_idx][1])) > 0
-                ]
-                if not post_remaining:
-                    print(f"  [EXPAND]   post-straddle left: no blockers → LR.x0 = {bx0}")
-                    boxes[lr_idx][0] = bx0
-                else:
-                    post_x0 = max(float(boxes[i][2]) for i in post_remaining)
-                    if post_x0 < float(boxes[lr_idx][0]):
-                        print(f"  [EXPAND]   post-straddle left: LR.x0 {float(boxes[lr_idx][0])} → {post_x0}")
-                        boxes[lr_idx][0] = post_x0
+                    pass_blocked.update(push_chain)
 
             elif direction == 'right':
-                blocking = [
+                # Unified blocking: rooms whose right edge extends past LR's right edge (outside OR straddling)
+                initial_blocking = [
                     i for i in range(K) if i != lr_idx
                     and i not in moved_rooms
-                    and boxes[i][0] >= lx1
-                    and min(boxes[i][3], ly1) - max(boxes[i][1], ly0) > 0
+                    and float(boxes[i][2]) > lx1
+                    and min(float(boxes[i][3]), ly1) - max(float(boxes[i][1]), ly0) > 0
                 ]
-                pass_blocked.update(blocking)
-                print(f"  [EXPAND] blocking={blocking}")
-                if not blocking:
+                print(f"  [EXPAND] blocking={initial_blocking}")
+                if not initial_blocking:
                     print(f"  [EXPAND] no blockers → LR.x1 = {bx1}")
                     boxes[lr_idx][2] = bx1
                 else:
-                    # Greedy compaction: sort outermost (largest x1) first, pack toward bx1
-                    srt = sorted(blocking, key=lambda i: -boxes[i][2])
-                    ws  = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
-                    placed = {}   # i -> new x1
+                    push_chain = set(initial_blocking)
+                    frontier = list(initial_blocking)
+                    while frontier:
+                        ri = frontier.pop()
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain or j in moved_rooms or j in wall_attached_all:
+                                continue
+                            if (float(boxes[j][0]) > float(boxes[ri][0])
+                                    and min(float(boxes[j][3]), float(boxes[ri][3])) - max(float(boxes[j][1]), float(boxes[ri][1])) > 0):
+                                push_chain.add(j)
+                                frontier.append(j)
+                    srt = sorted(push_chain, key=lambda i: -boxes[i][2])
+                    ws = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
+                    orig_lo = {i: float(boxes[i][0]) for i in srt}
+                    placed = {}
                     for i in srt:
                         pos = bx1
                         for j in placed:
-                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
+                            if min(float(boxes[i][3]), float(boxes[j][3])) - max(float(boxes[i][1]), float(boxes[j][1])) > 0:
                                 pos = min(pos, placed[j] - ws[j])
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain:
+                                continue
+                            if (float(boxes[j][0]) > orig_lo[i]
+                                    and min(float(boxes[i][3]), float(boxes[j][3])) - max(float(boxes[i][1]), float(boxes[j][1])) > 0):
+                                pos = min(pos, float(boxes[j][0]))
                         placed[i] = pos
                     for i in srt:
                         boxes[i][2] = placed[i]
                         boxes[i][0] = placed[i] - ws[i]
                         print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
-                    new_x1 = min(placed[i] - ws[i] for i in srt)
+                    new_x1 = min(placed[i] - ws[i] for i in initial_blocking)
                     print(f"  [EXPAND] LR.x1: {lx1} → {new_x1}")
                     boxes[lr_idx][2] = new_x1
-                # Straddle push: rooms that partially cross LR's new right edge move with it
-                lx1_now = float(boxes[lr_idx][2])
-                for i in sorted(
-                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
-                     and i not in pass_blocked
-                     and i not in wall_attached_all
-                     and boxes[i][0] < lx1_now < boxes[i][2]
-                     and min(boxes[i][3], float(boxes[lr_idx][3])) - max(boxes[i][1], float(boxes[lr_idx][1])) > 0],
-                    key=lambda i: -boxes[i][2]
-                ):
-                    w = float(boxes[i][2] - boxes[i][0])
-                    pos = bx1
-                    for j in range(K):
-                        if j == i or j == lr_idx:
-                            continue
-                        if boxes[j][2] > boxes[i][2]:
-                            if min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]) > 0:
-                                pos = min(pos, boxes[j][0])
-                    boxes[i][2] = pos
-                    boxes[i][0] = pos - w
-                    pass_blocked.add(i)
-                    print(f"  [EXPAND]   straddle-right room {i} → {boxes[i].tolist()}")
-                # Post-straddle advance: re-check if LR.x1 can advance into the vacated space
-                post_remaining = [
-                    i for i in range(K) if i != lr_idx
-                    and i not in moved_rooms and i not in pass_blocked
-                    and float(boxes[i][0]) >= float(boxes[lr_idx][2])
-                    and min(float(boxes[i][3]), float(boxes[lr_idx][3])) - max(float(boxes[i][1]), float(boxes[lr_idx][1])) > 0
-                ]
-                if not post_remaining:
-                    print(f"  [EXPAND]   post-straddle right: no blockers → LR.x1 = {bx1}")
-                    boxes[lr_idx][2] = bx1
-                else:
-                    post_x1 = min(float(boxes[i][0]) for i in post_remaining)
-                    if post_x1 > float(boxes[lr_idx][2]):
-                        print(f"  [EXPAND]   post-straddle right: LR.x1 {float(boxes[lr_idx][2])} → {post_x1}")
-                        boxes[lr_idx][2] = post_x1
+                    pass_blocked.update(push_chain)
 
             elif direction == 'top':
-                blocking = [
+                # Unified blocking: rooms whose top edge is above LR's top edge (outside OR straddling)
+                initial_blocking = [
                     i for i in range(K) if i != lr_idx
                     and i not in moved_rooms
-                    and boxes[i][3] <= ly0
-                    and min(boxes[i][2], lx1) - max(boxes[i][0], lx0) > 0
+                    and float(boxes[i][1]) < ly0
+                    and min(float(boxes[i][2]), lx1) - max(float(boxes[i][0]), lx0) > 0
                 ]
-                pass_blocked.update(blocking)
-                print(f"  [EXPAND] blocking={blocking}")
-                if not blocking:
+                print(f"  [EXPAND] blocking={initial_blocking}")
+                if not initial_blocking:
                     print(f"  [EXPAND] no blockers → LR.y0 = {by0}")
                     boxes[lr_idx][1] = by0
                 else:
-                    # Greedy compaction: sort outermost (smallest y0) first, pack toward by0
-                    srt = sorted(blocking, key=lambda i: boxes[i][1])
-                    hs  = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
-                    placed = {}   # i -> new y0
+                    push_chain = set(initial_blocking)
+                    frontier = list(initial_blocking)
+                    while frontier:
+                        ri = frontier.pop()
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain or j in moved_rooms or j in wall_attached_all:
+                                continue
+                            if (float(boxes[j][1]) < float(boxes[ri][1])
+                                    and min(float(boxes[j][2]), float(boxes[ri][2])) - max(float(boxes[j][0]), float(boxes[ri][0])) > 0):
+                                push_chain.add(j)
+                                frontier.append(j)
+                    srt = sorted(push_chain, key=lambda i: boxes[i][1])
+                    hs = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
+                    orig_lo = {i: float(boxes[i][1]) for i in srt}
+                    placed = {}
                     for i in srt:
                         pos = by0
                         for j in placed:
-                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
+                            if min(float(boxes[i][2]), float(boxes[j][2])) - max(float(boxes[i][0]), float(boxes[j][0])) > 0:
                                 pos = max(pos, placed[j] + hs[j])
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain:
+                                continue
+                            if (float(boxes[j][1]) < orig_lo[i]
+                                    and min(float(boxes[i][2]), float(boxes[j][2])) - max(float(boxes[i][0]), float(boxes[j][0])) > 0):
+                                pos = max(pos, float(boxes[j][3]))
                         placed[i] = pos
                     for i in srt:
                         boxes[i][1] = placed[i]
                         boxes[i][3] = placed[i] + hs[i]
                         print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
-                    new_y0 = max(placed[i] + hs[i] for i in srt)
+                    new_y0 = max(placed[i] + hs[i] for i in initial_blocking)
                     print(f"  [EXPAND] LR.y0: {ly0} → {new_y0}")
                     boxes[lr_idx][1] = new_y0
-                # Straddle push: rooms that partially cross LR's new top edge move with it
-                ly0_now = float(boxes[lr_idx][1])
-                for i in sorted(
-                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
-                     and i not in pass_blocked
-                     and i not in wall_attached_all
-                     and boxes[i][1] < ly0_now < boxes[i][3]
-                     and min(boxes[i][2], float(boxes[lr_idx][2])) - max(boxes[i][0], float(boxes[lr_idx][0])) > 0],
-                    key=lambda i: boxes[i][1]
-                ):
-                    h = float(boxes[i][3] - boxes[i][1])
-                    pos = by0
-                    for j in range(K):
-                        if j == i or j == lr_idx:
-                            continue
-                        if boxes[j][1] < boxes[i][1]:
-                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
-                                pos = max(pos, boxes[j][3])
-                    boxes[i][1] = pos
-                    boxes[i][3] = pos + h
-                    pass_blocked.add(i)
-                    print(f"  [EXPAND]   straddle-top room {i} → {boxes[i].tolist()}")
-                # Post-straddle advance: re-check if LR.y0 can advance into the vacated space
-                post_remaining = [
-                    i for i in range(K) if i != lr_idx
-                    and i not in moved_rooms and i not in pass_blocked
-                    and float(boxes[i][3]) <= float(boxes[lr_idx][1])
-                    and min(float(boxes[i][2]), float(boxes[lr_idx][2])) - max(float(boxes[i][0]), float(boxes[lr_idx][0])) > 0
-                ]
-                if not post_remaining:
-                    print(f"  [EXPAND]   post-straddle top: no blockers → LR.y0 = {by0}")
-                    boxes[lr_idx][1] = by0
-                else:
-                    post_y0 = max(float(boxes[i][3]) for i in post_remaining)
-                    if post_y0 < float(boxes[lr_idx][1]):
-                        print(f"  [EXPAND]   post-straddle top: LR.y0 {float(boxes[lr_idx][1])} → {post_y0}")
-                        boxes[lr_idx][1] = post_y0
+                    pass_blocked.update(push_chain)
 
             elif direction == 'bottom':
-                blocking = [
+                # Unified blocking: rooms whose bottom edge extends past LR's bottom edge (outside OR straddling)
+                initial_blocking = [
                     i for i in range(K) if i != lr_idx
                     and i not in moved_rooms
-                    and boxes[i][1] >= ly1
-                    and min(boxes[i][2], lx1) - max(boxes[i][0], lx0) > 0
+                    and float(boxes[i][3]) > ly1
+                    and min(float(boxes[i][2]), lx1) - max(float(boxes[i][0]), lx0) > 0
                 ]
-                pass_blocked.update(blocking)
-                print(f"  [EXPAND] blocking={blocking}")
-                if not blocking:
+                print(f"  [EXPAND] blocking={initial_blocking}")
+                if not initial_blocking:
                     print(f"  [EXPAND] no blockers → LR.y1 = {by1}")
                     boxes[lr_idx][3] = by1
                 else:
-                    # Greedy compaction: sort outermost (largest y1) first, pack toward by1
-                    srt = sorted(blocking, key=lambda i: -boxes[i][3])
-                    hs  = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
-                    placed = {}   # i -> new y1
+                    push_chain = set(initial_blocking)
+                    frontier = list(initial_blocking)
+                    while frontier:
+                        ri = frontier.pop()
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain or j in moved_rooms or j in wall_attached_all:
+                                continue
+                            if (float(boxes[j][1]) > float(boxes[ri][1])
+                                    and min(float(boxes[j][2]), float(boxes[ri][2])) - max(float(boxes[j][0]), float(boxes[ri][0])) > 0):
+                                push_chain.add(j)
+                                frontier.append(j)
+                    srt = sorted(push_chain, key=lambda i: -boxes[i][3])
+                    hs = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
+                    orig_lo = {i: float(boxes[i][1]) for i in srt}
+                    placed = {}
                     for i in srt:
                         pos = by1
                         for j in placed:
-                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
+                            if min(float(boxes[i][2]), float(boxes[j][2])) - max(float(boxes[i][0]), float(boxes[j][0])) > 0:
                                 pos = min(pos, placed[j] - hs[j])
+                        for j in range(K):
+                            if j == lr_idx or j in push_chain:
+                                continue
+                            if (float(boxes[j][1]) > orig_lo[i]
+                                    and min(float(boxes[i][2]), float(boxes[j][2])) - max(float(boxes[i][0]), float(boxes[j][0])) > 0):
+                                pos = min(pos, float(boxes[j][1]))
                         placed[i] = pos
                     for i in srt:
                         boxes[i][3] = placed[i]
                         boxes[i][1] = placed[i] - hs[i]
                         print(f"  [EXPAND]   room {i} → {boxes[i].tolist()}")
-                    new_y1 = min(placed[i] - hs[i] for i in srt)
+                    new_y1 = min(placed[i] - hs[i] for i in initial_blocking)
                     print(f"  [EXPAND] LR.y1: {ly1} → {new_y1}")
                     boxes[lr_idx][3] = new_y1
-                # Straddle push: rooms that partially cross LR's new bottom edge move with it
-                ly1_now = float(boxes[lr_idx][3])
-                for i in sorted(
-                    [i for i in range(K) if i != lr_idx and i not in moved_rooms
-                     and i not in pass_blocked
-                     and i not in wall_attached_all
-                     and boxes[i][1] < ly1_now < boxes[i][3]
-                     and min(boxes[i][2], float(boxes[lr_idx][2])) - max(boxes[i][0], float(boxes[lr_idx][0])) > 0],
-                    key=lambda i: -boxes[i][3]
-                ):
-                    h = float(boxes[i][3] - boxes[i][1])
-                    pos = by1
-                    for j in range(K):
-                        if j == i or j == lr_idx:
-                            continue
-                        if boxes[j][3] > boxes[i][3]:
-                            if min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0]) > 0:
-                                pos = min(pos, boxes[j][1])
-                    boxes[i][3] = pos
-                    boxes[i][1] = pos - h
-                    pass_blocked.add(i)
-                    print(f"  [EXPAND]   straddle-bottom room {i} → {boxes[i].tolist()}")
-                # Post-straddle advance: re-check if LR.y1 can advance into the vacated space
-                post_remaining = [
-                    i for i in range(K) if i != lr_idx
-                    and i not in moved_rooms and i not in pass_blocked
-                    and float(boxes[i][1]) >= float(boxes[lr_idx][3])
-                    and min(float(boxes[i][2]), float(boxes[lr_idx][2])) - max(float(boxes[i][0]), float(boxes[lr_idx][0])) > 0
-                ]
-                if not post_remaining:
-                    print(f"  [EXPAND]   post-straddle bottom: no blockers → LR.y1 = {by1}")
-                    boxes[lr_idx][3] = by1
-                else:
-                    post_y1 = min(float(boxes[i][1]) for i in post_remaining)
-                    if post_y1 > float(boxes[lr_idx][3]):
-                        print(f"  [EXPAND]   post-straddle bottom: LR.y1 {float(boxes[lr_idx][3])} → {post_y1}")
-                        boxes[lr_idx][3] = post_y1
+                    pass_blocked.update(push_chain)
 
         # Every room that was a blocker this pass becomes fixed for subsequent passes,
         # whether it physically moved or was already at the boundary wall.
@@ -776,6 +721,269 @@ def expand_living_room(boxes, types, boundary):
         print(f"  [EXPAND] Warning: reached max passes ({MAX_PASSES}) without convergence")
 
     print(f"  [EXPAND] Final LR: {boxes[lr_idx].tolist()}")
+    return boxes.astype(int)
+
+
+def snap_single_edge_rooms(boxes, types, boundary, snap_tol=2.0, max_gap=30.0):
+    """
+    Post-expansion pass: any non-LR room connected on fewer than 2 sides gets
+    snapped to its nearest available contact point (wall or adjacent room edge),
+    closing small gaps and producing a tighter layout.
+
+    A side is "connected" if its edge is within snap_tol of a boundary wall or
+    another room's facing edge AND there is positive overlap in the perpendicular
+    axis.  Only gaps <= max_gap are eligible.  Moves are validated to avoid
+    creating overlaps.  Repeats until stable (max 10 iterations).
+    """
+    boxes = np.array(boxes, dtype=float)
+    types = np.array(types, dtype=int)
+    K = len(boxes)
+
+    bnd  = np.array(boundary)
+    bx0  = float(np.min(bnd[:, 0]))
+    by0  = float(np.min(bnd[:, 1]))
+    bx1  = float(np.max(bnd[:, 0]))
+    by1  = float(np.max(bnd[:, 1]))
+
+    # Build closed polygon vertex list for actual wall position queries.
+    # This is critical for non-rectangular (e.g., L-shaped) boundaries:
+    # bx0/bx1/by0/by1 are the bounding box extremes, but the actual wall
+    # at any given y-level may be much closer to the rooms.
+    poly_verts = bnd[:, :2].tolist()
+    if poly_verts[0] != poly_verts[-1]:
+        poly_verts.append(poly_verts[0])  # close the polygon
+
+    def actual_walls(x0, y0, x1, y1):
+        """Return actual (left, right, top, bottom) wall at this room's midpoint."""
+        cy = (y0 + y1) / 2.0
+        cx = (x0 + x1) / 2.0
+        xr = _poly_x_range_at_y(poly_verts, cy)
+        yr = _poly_y_range_at_x(poly_verts, cx)
+        lw = xr[0] if xr else bx0
+        rw = xr[1] if xr else bx1
+        tw = yr[0] if yr else by0
+        bw = yr[1] if yr else by1
+        return lw, rw, tw, bw
+
+    LR_TYPE = 0
+
+    _ROOM_NAMES = {0: 'LivingRoom', 1: 'MasterRoom', 2: 'Kitchen', 3: 'Bathroom',
+                   4: 'DiningRoom', 5: 'ChildRoom', 6: 'StudyRoom', 7: 'SecondRoom',
+                   8: 'GuestRoom', 9: 'Balcony', 10: 'Entrance', 11: 'Storage',
+                   12: 'Wall', 13: 'Exterior', 14: 'LivingDining', 15: 'FrontDoor'}
+
+    # Types excluded from both connectivity detection and snap targets.
+    # Types excluded from connectivity checks: LR (0) creates artificial adjacencies
+    # after expansion; Entrance (10) and unknown type 15 are non-habitable elements.
+    _EXCL_CONNECTIVITY = {0, 10, 15}
+
+    # Types excluded from being snap targets: Entrance (10), Wall (12), Exterior (13),
+    # unknown type 15.  LR (0) is intentionally NOT excluded — rooms should be able
+    # to snap toward LR edges to close small gaps.
+    _EXCL_TARGETS = {10, 12, 13, 15}
+
+    def room_label(i):
+        return f"room[{i}] {_ROOM_NAMES.get(int(types[i]), str(types[i]))}"
+
+    def yov(i, j):
+        return (min(float(boxes[i][3]), float(boxes[j][3]))
+                - max(float(boxes[i][1]), float(boxes[j][1]))) > 0
+
+    def xov(i, j):
+        return (min(float(boxes[i][2]), float(boxes[j][2]))
+                - max(float(boxes[i][0]), float(boxes[j][0]))) > 0
+
+    def connected_sides(i):
+        x0, y0, x1, y1 = (float(boxes[i][k]) for k in range(4))
+        lw, rw, tw, bw = actual_walls(x0, y0, x1, y1)
+        cl = abs(x0 - lw) <= snap_tol or any(
+            abs(x0 - float(boxes[j][2])) <= snap_tol and yov(i, j)
+            for j in range(K) if j != i and int(types[j]) not in _EXCL_CONNECTIVITY)
+        cr = abs(x1 - rw) <= snap_tol or any(
+            abs(x1 - float(boxes[j][0])) <= snap_tol and yov(i, j)
+            for j in range(K) if j != i and int(types[j]) not in _EXCL_CONNECTIVITY)
+        ct = abs(y0 - tw) <= snap_tol or any(
+            abs(y0 - float(boxes[j][3])) <= snap_tol and xov(i, j)
+            for j in range(K) if j != i and int(types[j]) not in _EXCL_CONNECTIVITY)
+        cb = abs(y1 - bw) <= snap_tol or any(
+            abs(y1 - float(boxes[j][1])) <= snap_tol and xov(i, j)
+            for j in range(K) if j != i and int(types[j]) not in _EXCL_CONNECTIVITY)
+        return cl, cr, ct, cb
+
+    def no_overlap(i, nx0, ny0, nx1, ny1):
+        # Reject if outside the bounding box
+        if nx0 < bx0 - 1.0 or nx1 > bx1 + 1.0 or ny0 < by0 - 1.0 or ny1 > by1 + 1.0:
+            return False
+        # Reject if outside the actual polygon boundary at the new room's midpoint.
+        # This catches cases where bx1/by1 extends beyond the actual L-shaped wall.
+        nxr = _poly_x_range_at_y(poly_verts, (ny0 + ny1) / 2.0)
+        nyr = _poly_y_range_at_x(poly_verts, (nx0 + nx1) / 2.0)
+        if nxr and (nx0 < nxr[0] - 1.0 or nx1 > nxr[1] + 1.0):
+            return False
+        if nyr and (ny0 < nyr[0] - 1.0 or ny1 > nyr[1] + 1.0):
+            return False
+        for j in range(K):
+            if j == i:
+                continue
+            xo = min(nx1, float(boxes[j][2])) - max(nx0, float(boxes[j][0]))
+            yo = min(ny1, float(boxes[j][3])) - max(ny0, float(boxes[j][1]))
+            if xo > 1.0 and yo > 1.0:
+                return False
+        return True
+
+    for iteration in range(10):
+        print(f"[SNAP] === Iteration {iteration + 1} ===")
+        any_moved = False
+        for i in range(K):
+            if int(types[i]) == LR_TYPE:
+                continue
+            x0, y0, x1, y1 = (float(boxes[i][k]) for k in range(4))
+            w, h = x1 - x0, y1 - y0
+            cl, cr, ct, cb = connected_sides(i)
+            sides_count = sum([cl, cr, ct, cb])
+            print(f"  [SNAP] {room_label(i)} pos=({x0:.0f},{y0:.0f},{x1:.0f},{y1:.0f}) "
+                  f"connected=[L:{cl} R:{cr} T:{ct} B:{cb}] ({sides_count} sides)")
+            if sides_count >= 2:
+                print(f"  [SNAP]   → SKIP (already connected on {sides_count} sides)")
+                continue
+
+            # Collect candidate snaps: (gap, dx, dy, label)
+            cands = []
+            rejected = []
+
+            # Compute actual wall positions using the polygon (not just bounding box).
+            # For L-shaped boundaries, bx1/by1 may extend beyond the actual wall at
+            # this room's y/x level — using actual walls prevents snapping into voids.
+            aw_left, aw_right, aw_top, aw_bot = actual_walls(x0, y0, x1, y1)
+
+            # Wall-anchor preservation: if the room already touches a boundary wall,
+            # don't snap in the direction that would pull it away from that wall.
+            # This prevents oscillation when a gap to LR exists on the opposite side.
+            wall_left   = abs(x0 - aw_left)  <= snap_tol
+            wall_right  = abs(x1 - aw_right) <= snap_tol
+            wall_top    = abs(y0 - aw_top)   <= snap_tol
+            wall_bottom = abs(y1 - aw_bot)   <= snap_tol
+
+            if not cl and not wall_right:
+                gap = x0 - aw_left
+                if gap <= 0:
+                    print(f"  [SNAP]   LEFT: gap={gap:.1f} (at or past wall, skipping)")
+                elif gap > max_gap:
+                    print(f"  [SNAP]   LEFT wall: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                elif not no_overlap(i, aw_left, y0, aw_left + w, y1):
+                    rejected.append(f"left-wall (gap={gap:.1f}, overlap blocked)")
+                else:
+                    cands.append((gap, aw_left - x0, 0.0, 'left-wall'))
+                for j in range(K):
+                    if j == i or int(types[j]) in _EXCL_TARGETS or int(types[j]) > 14:
+                        continue
+                    jx1 = float(boxes[j][2])
+                    if jx1 < x0:
+                        gap = x0 - jx1
+                        if not yov(i, j):
+                            pass  # no y-overlap, ignore silently
+                        elif gap > max_gap:
+                            print(f"  [SNAP]   LEFT {room_label(j)}: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                        elif not no_overlap(i, jx1, y0, jx1 + w, y1):
+                            rejected.append(f"{room_label(j)} left (gap={gap:.1f}, overlap blocked)")
+                        else:
+                            cands.append((gap, jx1 - x0, 0.0, room_label(j)))
+
+            if not cr and not wall_left:
+                gap = aw_right - x1
+                if gap <= 0:
+                    print(f"  [SNAP]   RIGHT: gap={gap:.1f} (at or past wall, skipping)")
+                elif gap > max_gap:
+                    print(f"  [SNAP]   RIGHT wall: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                elif not no_overlap(i, aw_right - w, y0, aw_right, y1):
+                    rejected.append(f"right-wall (gap={gap:.1f}, overlap blocked)")
+                else:
+                    cands.append((gap, aw_right - x1, 0.0, 'right-wall'))
+                for j in range(K):
+                    if j == i or int(types[j]) in _EXCL_TARGETS or int(types[j]) > 14:
+                        continue
+                    jx0 = float(boxes[j][0])
+                    if jx0 > x1:
+                        gap = jx0 - x1
+                        if not yov(i, j):
+                            pass
+                        elif gap > max_gap:
+                            print(f"  [SNAP]   RIGHT {room_label(j)}: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                        elif not no_overlap(i, jx0 - w, y0, jx0, y1):
+                            rejected.append(f"{room_label(j)} right (gap={gap:.1f}, overlap blocked)")
+                        else:
+                            cands.append((gap, jx0 - x1, 0.0, room_label(j)))
+
+            if not ct and not wall_bottom:
+                gap = y0 - aw_top
+                if gap <= 0:
+                    print(f"  [SNAP]   TOP: gap={gap:.1f} (at or past wall, skipping)")
+                elif gap > max_gap:
+                    print(f"  [SNAP]   TOP wall: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                elif not no_overlap(i, x0, aw_top, x1, aw_top + h):
+                    rejected.append(f"top-wall (gap={gap:.1f}, overlap blocked)")
+                else:
+                    cands.append((gap, 0.0, aw_top - y0, 'top-wall'))
+                for j in range(K):
+                    if j == i or int(types[j]) in _EXCL_TARGETS or int(types[j]) > 14:
+                        continue
+                    jy1 = float(boxes[j][3])
+                    if jy1 < y0:
+                        gap = y0 - jy1
+                        if not xov(i, j):
+                            pass
+                        elif gap > max_gap:
+                            print(f"  [SNAP]   TOP {room_label(j)}: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                        elif not no_overlap(i, x0, jy1, x1, jy1 + h):
+                            rejected.append(f"{room_label(j)} top (gap={gap:.1f}, overlap blocked)")
+                        else:
+                            cands.append((gap, 0.0, jy1 - y0, room_label(j)))
+
+            if not cb and not wall_top:
+                gap = aw_bot - y1
+                if gap <= 0:
+                    print(f"  [SNAP]   BOT: gap={gap:.1f} (at or past wall, skipping)")
+                elif gap > max_gap:
+                    print(f"  [SNAP]   BOT wall: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                elif not no_overlap(i, x0, aw_bot - h, x1, aw_bot):
+                    rejected.append(f"bot-wall (gap={gap:.1f}, overlap blocked)")
+                else:
+                    cands.append((gap, 0.0, aw_bot - y1, 'bot-wall'))
+                for j in range(K):
+                    if j == i or int(types[j]) in _EXCL_TARGETS or int(types[j]) > 14:
+                        continue
+                    jy0 = float(boxes[j][1])
+                    if jy0 > y1:
+                        gap = jy0 - y1
+                        if not xov(i, j):
+                            pass
+                        elif gap > max_gap:
+                            print(f"  [SNAP]   BOT {room_label(j)}: gap={gap:.1f} > max_gap={max_gap}, skipped")
+                        elif not no_overlap(i, x0, jy0 - h, x1, jy0):
+                            rejected.append(f"{room_label(j)} bot (gap={gap:.1f}, overlap blocked)")
+                        else:
+                            cands.append((gap, 0.0, jy0 - y1, room_label(j)))
+
+            if rejected:
+                print(f"  [SNAP]   Rejected candidates: {rejected}")
+
+            if not cands:
+                print(f"  [SNAP]   → NO valid snap candidates found")
+                continue
+
+            print(f"  [SNAP]   Candidates: {[(t, f'{g:.1f}px') for g, _, _, t in cands]}")
+            gap, dx, dy, target = min(cands, key=lambda c: c[0])
+            print(f"  [SNAP]   → SNAP to {target} (gap={gap:.1f}px, move=({dx:.1f},{dy:.1f}))")
+            boxes[i][0] += dx
+            boxes[i][2] += dx
+            boxes[i][1] += dy
+            boxes[i][3] += dy
+            any_moved = True
+
+        if not any_moved:
+            print(f"[SNAP] Stable after {iteration + 1} iteration(s)")
+            break
+
     return boxes.astype(int)
 
 
@@ -799,3 +1007,184 @@ def boxes_to_boundaries(boxes):
         ], dtype=float)
         boundaries.append(poly)
     return boundaries
+
+
+def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
+    """Expand rooms to fill small gaps between their edges and the exterior boundary wall.
+
+    For each room and each of its 4 sides, if the gap to the **actual** boundary wall
+    facing that side (queried at the room's midpoint via polygon scan) is <= gap_threshold
+    AND no other room occupies that gap region, expand the room's edge to that wall.
+
+    Using the polygon scan rather than the global bounding box correctly handles
+    non-rectangular boundaries (L-shapes, T-shapes, etc.) where the global min/max
+    x or y is not the wall that faces a particular room.
+    """
+    boxes = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])] for b in boxes]
+    K = len(boxes)
+    boundary_arr = np.array(boundary)
+
+    # Global extents — only used for logging and fallback
+    bx0_g = float(np.min(boundary_arr[:, 0]))
+    bx1_g = float(np.max(boundary_arr[:, 0]))
+    by0_g = float(np.min(boundary_arr[:, 1]))
+    by1_g = float(np.max(boundary_arr[:, 1]))
+
+    # Build closed polygon vertex list from boundary (x, y columns only)
+    poly_verts = boundary_arr[:, :2].tolist()
+    if poly_verts[0] != poly_verts[-1]:
+        poly_verts.append(poly_verts[0])
+
+    _ROOM_NAMES = {
+        0: 'LivingRoom', 1: 'MasterRoom', 2: 'Kitchen', 3: 'Bathroom',
+        4: 'DiningRoom', 5: 'ChildRoom', 6: 'StudyRoom', 7: 'SecondRoom',
+        8: 'GuestRoom', 9: 'Balcony', 10: 'Entrance', 11: 'Storage',
+        12: 'Wall-in', 13: 'External', 14: 'ExteriorWall', 15: 'FrontDoor',
+        16: 'InteriorWall', 17: 'InteriorDoor',
+    }
+
+    def room_label(i):
+        t = int(types[i])
+        name = _ROOM_NAMES.get(t, f'type{t}')
+        return f"room[{i}] {name}"
+
+    def find_blocker(i, check_fn):
+        for j in range(K):
+            # LivingRoom (type 0) is excluded — after expansion it touches walls
+            # and should not prevent other rooms from filling small gaps
+            if j != i and int(types[j]) != 0 and check_fn(j):
+                return j
+        return None
+
+    print(f"[FILL GAPS] Boundary bbox: x=[{bx0_g:.1f}, {bx1_g:.1f}] y=[{by0_g:.1f}, {by1_g:.1f}], threshold={gap_threshold}px")
+
+    for i in range(K):
+        x0, y0, x1, y1 = boxes[i]
+        name = room_label(i)
+        cy = (y0 + y1) / 2.0   # room y-midpoint — used to query left/right walls
+        cx = (x0 + x1) / 2.0   # room x-midpoint — used to query top/bottom walls
+
+        # Actual left and right walls at the room's y-midpoint
+        x_range = _poly_x_range_at_y(poly_verts, cy)
+        wall_left  = x_range[0] if x_range else bx0_g
+        wall_right = x_range[1] if x_range else bx1_g
+
+        # Actual top and bottom walls at the room's x-midpoint
+        y_range = _poly_y_range_at_x(poly_verts, cx)
+        wall_top    = y_range[0] if y_range else by0_g
+        wall_bottom = y_range[1] if y_range else by1_g
+
+        # LEFT
+        gap = x0 - wall_left
+        if gap <= 0:
+            pass  # already at or past the wall
+        elif gap > gap_threshold:
+            print(f"[FILL GAPS]   {name} LEFT:   gap={gap:.2f}px (wall={wall_left:.1f}) > threshold, skipping")
+        else:
+            blocker = find_blocker(i, lambda j: (
+                min(y1, boxes[j][3]) - max(y0, boxes[j][1]) > 0
+                and boxes[j][2] > wall_left
+                and boxes[j][0] < x0
+            ))
+            if blocker is not None:
+                print(f"[FILL GAPS]   {name} LEFT:   gap={gap:.2f}px (wall={wall_left:.1f}), blocked by {room_label(blocker)}")
+            else:
+                print(f"[FILL GAPS]   {name} LEFT:   gap={gap:.2f}px (wall={wall_left:.1f}) → expanding to wall")
+                boxes[i][0] = wall_left
+                x0 = wall_left
+
+        # RIGHT
+        gap = wall_right - x1
+        if gap <= 0:
+            pass
+        elif gap > gap_threshold:
+            print(f"[FILL GAPS]   {name} RIGHT:  gap={gap:.2f}px (wall={wall_right:.1f}) > threshold, skipping")
+        else:
+            blocker = find_blocker(i, lambda j: (
+                min(y1, boxes[j][3]) - max(y0, boxes[j][1]) > 0
+                and boxes[j][0] < wall_right
+                and boxes[j][2] > x1
+            ))
+            if blocker is not None:
+                print(f"[FILL GAPS]   {name} RIGHT:  gap={gap:.2f}px (wall={wall_right:.1f}), blocked by {room_label(blocker)}")
+            else:
+                print(f"[FILL GAPS]   {name} RIGHT:  gap={gap:.2f}px (wall={wall_right:.1f}) → expanding to wall")
+                boxes[i][2] = wall_right
+                x1 = wall_right
+
+        # TOP
+        gap = y0 - wall_top
+        if gap <= 0:
+            pass
+        elif gap > gap_threshold:
+            print(f"[FILL GAPS]   {name} TOP:    gap={gap:.2f}px (wall={wall_top:.1f}) > threshold, skipping")
+        else:
+            blocker = find_blocker(i, lambda j: (
+                min(x1, boxes[j][2]) - max(x0, boxes[j][0]) > 0
+                and boxes[j][3] > wall_top
+                and boxes[j][1] < y0
+            ))
+            if blocker is not None:
+                print(f"[FILL GAPS]   {name} TOP:    gap={gap:.2f}px (wall={wall_top:.1f}), blocked by {room_label(blocker)}")
+            else:
+                print(f"[FILL GAPS]   {name} TOP:    gap={gap:.2f}px (wall={wall_top:.1f}) → expanding to wall")
+                boxes[i][1] = wall_top
+                y0 = wall_top
+
+        # BOTTOM
+        gap = wall_bottom - y1
+        if gap <= 0:
+            pass
+        elif gap > gap_threshold:
+            print(f"[FILL GAPS]   {name} BOTTOM: gap={gap:.2f}px (wall={wall_bottom:.1f}) > threshold, skipping")
+        else:
+            blocker = find_blocker(i, lambda j: (
+                min(x1, boxes[j][2]) - max(x0, boxes[j][0]) > 0
+                and boxes[j][1] < wall_bottom
+                and boxes[j][3] > y1
+            ))
+            if blocker is not None:
+                print(f"[FILL GAPS]   {name} BOTTOM: gap={gap:.2f}px (wall={wall_bottom:.1f}), blocked by {room_label(blocker)}")
+            else:
+                print(f"[FILL GAPS]   {name} BOTTOM: gap={gap:.2f}px (wall={wall_bottom:.1f}) → expanding to wall")
+                boxes[i][3] = wall_bottom
+                y1 = wall_bottom
+
+    print(f"[FILL GAPS] Done.")
+    return [np.array(b) for b in boxes]
+
+
+def fill_living_room(boxes, types, boundary):
+    """
+    Expand the Living Room (type 0) to cover the entire boundary polygon,
+    without moving or resizing any other room.  Other rooms are drawn on top
+    in the DXF export, so visual overlap is intentional.
+
+    The LR is expanded to the actual polygon walls (queried at the LR midpoint)
+    and iterated until stable so that the midpoint query converges as the LR
+    grows toward the full boundary extent.
+    """
+    boxes = [list(b) for b in boxes]
+    types = list(types)
+    K = len(boxes)
+
+    lr_idx = next((i for i in range(K) if int(types[i]) == 0), None)
+    if lr_idx is None:
+        print("[FILL LR] No LivingRoom found — skipping.")
+        return [np.array(b) for b in boxes]
+
+    boundary_arr = np.array(boundary)
+    bx0 = float(np.min(boundary_arr[:, 0]))
+    by0 = float(np.min(boundary_arr[:, 1]))
+    bx1 = float(np.max(boundary_arr[:, 0]))
+    by1 = float(np.max(boundary_arr[:, 1]))
+
+    lx0, ly0, lx1, ly1 = (float(boxes[lr_idx][k]) for k in range(4))
+    print(f"[FILL LR] Expanding LR from ({lx0:.0f},{ly0:.0f},{lx1:.0f},{ly1:.0f}) "
+          f"to bounding box ({bx0:.0f},{by0:.0f},{bx1:.0f},{by1:.0f})")
+    boxes[lr_idx][0] = bx0
+    boxes[lr_idx][1] = by0
+    boxes[lr_idx][2] = bx1
+    boxes[lr_idx][3] = by1
+
+    return [np.array(b) for b in boxes]

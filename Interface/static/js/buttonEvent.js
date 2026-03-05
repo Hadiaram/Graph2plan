@@ -1243,9 +1243,6 @@ function CreateLeftFloorPlan(boxes, exterior, door) {
 function CreateLeftGraph(rooms, roomID) {
     $.getJSON("/index/TransGraph/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
         //     $.getJSON("/index/TransGraph_net/", {'userInfo': rooms.toString(), 'roomID': roomID}, function (ret) {
-        // Show Auto-Adjust button when graph is transferred
-        document.getElementById("AutoAdjust").style.display = "block";
-
         document.getElementById("Generate").onclick = function () {
             var AdjustNewGraph = [];
             AdjustNewGraph = GetEditGraph(ret['rmpos']);
@@ -1275,19 +1272,8 @@ function CreateLeftGraph(rooms, roomID) {
                 console.log("🎨 [FRONTEND] Rendering with CreateLeftPlan...");
                 CreateLeftPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret["door"], adjust_ret["windows"], adjust_ret["indoor"], adjust_ret["windowsline"]);
                 d3.select('body').select('#LeftGraphSVG').selectAll('circle').attr("r", 0);
-                document.getElementById("OptimizeLayout").style.display = "block";
-                var showOutsideBtn = document.getElementById("showOutsideButton");
-                if (showOutsideBtn) { showOutsideBtn.style.display = "block"; }
-                var expandLRBtn = document.getElementById("expandLivingRoom");
-                if (expandLRBtn) { expandLRBtn.style.display = "block"; }
                 var dxfBtn = document.getElementById("exportDXFButton");
                 if (dxfBtn) { dxfBtn.style.display = "block"; }
-                var fillGapsBtn = document.getElementById("fillWallGapsButton");
-                if (fillGapsBtn) { fillGapsBtn.style.display = "block"; }
-                var snapRoomsBtn = document.getElementById("snapRoomsButton");
-                if (snapRoomsBtn) { snapRoomsBtn.style.display = "block"; }
-                var fillLRBtn = document.getElementById("fillLivingRoomButton");
-                if (fillLRBtn) { fillLRBtn.style.display = "block"; }
 
                 var measureBtn = document.getElementById("measureButton");
                 if (measureBtn) { measureBtn.style.display = "block"; }
@@ -1321,245 +1307,83 @@ function CreateLeftGraph(rooms, roomID) {
             });
         };
 
-        // Optimize button handler
-        document.getElementById("OptimizeLayout").onclick = function () {
-            console.log("🔧 [FRONTEND] Optimize — sending OptimizeLayout request");
-            var btn = document.getElementById("OptimizeLayout");
-            btn.textContent = "Optimizing…";
-            btn.style.backgroundColor = "#616161";
+        // Run All — runs the full pipeline: Generate → Optimize → Expand LR →
+        //           Snap Rooms → Fill Gaps → Fill LR in sequence.
+        document.getElementById("runPipelineButton").onclick = function () {
+            var btn = document.getElementById("runPipelineButton");
+            var origColor = "#1565C0";
 
-            $.get("/index/OptimizeLayout/", {}, function (opt_ret) {
-                console.log("✅ [FRONTEND] OptimizeLayout response received");
-                CreateLeftPlan(opt_ret['roomret'], opt_ret['exterior'], opt_ret["door"],
-                               opt_ret["windows"], opt_ret["indoor"], opt_ret["windowsline"]);
-                btn.textContent = "Optimize";
-                btn.style.backgroundColor = "#00897b";
-            }).fail(function (xhr, status, error) {
-                console.error("❌ [FRONTEND] OptimizeLayout FAILED:", xhr.responseText);
-                alert("Optimization failed. Check the server console for details.");
-                btn.textContent = "Optimize";
-                btn.style.backgroundColor = "#00897b";
-            });
-        };
-
-        // Expand Living Room button handler
-        document.getElementById("expandLivingRoom").onclick = function () {
-            var btn = document.getElementById("expandLivingRoom");
-            btn.textContent = "Expanding…";
-            btn.style.backgroundColor = "#616161";
-
-            $.get("/index/ExpandLivingRoom/", {}, function (ret) {
-                console.log("✅ [FRONTEND] ExpandLivingRoom response received");
-                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
-                               ret["windows"], ret["indoor"], ret["windowsline"]);
-                btn.textContent = "Expand LR";
-                btn.style.backgroundColor = "#e65100";
-            }).fail(function (xhr, status, error) {
-                console.error("❌ [FRONTEND] ExpandLivingRoom FAILED:", xhr.responseText);
-                alert("Expansion failed. Check the server console for details.");
-                btn.textContent = "Expand LR";
-                btn.style.backgroundColor = "#e65100";
-            });
-        };
-
-        // Fill Wall Gaps button handler
-        document.getElementById("fillWallGapsButton").onclick = function () {
-            var btn = document.getElementById("fillWallGapsButton");
-            btn.textContent = "Filling…";
-            btn.style.backgroundColor = "#616161";
-
-            $.get("/index/FillWallGaps/", {}, function (ret) {
-                console.log("✅ [FRONTEND] FillWallGaps response received");
-                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
-                               ret["windows"], ret["indoor"], ret["windowsline"]);
-                btn.textContent = "Fill Gaps";
-                btn.style.backgroundColor = "#388E3C";
-            }).fail(function (xhr, status, error) {
-                console.error("❌ [FRONTEND] FillWallGaps FAILED:", xhr.responseText);
-                alert("Fill gaps failed. Check the server console for details.");
-                btn.textContent = "Fill Gaps";
-                btn.style.backgroundColor = "#388E3C";
-            });
-        };
-
-        // Snap Rooms button handler
-        document.getElementById("snapRoomsButton").onclick = function () {
-            var btn = document.getElementById("snapRoomsButton");
-            btn.textContent = "Snapping…";
-            btn.style.backgroundColor = "#616161";
-
-            $.get("/index/SnapRooms/", {}, function (ret) {
-                console.log("✅ [FRONTEND] SnapRooms response received");
-                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
-                               ret["windows"], ret["indoor"], ret["windowsline"]);
-                btn.textContent = "Snap Rooms";
-                btn.style.backgroundColor = "#6A1B9A";
-            }).fail(function (xhr, status, error) {
-                console.error("❌ [FRONTEND] SnapRooms FAILED:", xhr.responseText);
-                alert("Snap rooms failed. Check the server console for details.");
-                btn.textContent = "Snap Rooms";
-                btn.style.backgroundColor = "#6A1B9A";
-            });
-        };
-
-        // Fill Living Room button handler
-        document.getElementById("fillLivingRoomButton").onclick = function () {
-            var btn = document.getElementById("fillLivingRoomButton");
-            btn.textContent = "Filling…";
-            btn.style.backgroundColor = "#616161";
-
-            $.get("/index/FillLivingRoom/", {}, function (ret) {
-                console.log("✅ [FRONTEND] FillLivingRoom response received");
-                CreateLeftPlan(ret['roomret'], ret['exterior'], ret["door"],
-                               ret["windows"], ret["indoor"], ret["windowsline"]);
-                btn.textContent = "Fill LR";
-                btn.style.backgroundColor = "#BF360C";
-            }).fail(function (xhr, status, error) {
-                console.error("❌ [FRONTEND] FillLivingRoom FAILED:", xhr.responseText);
-                alert("Fill LR failed. Check the server console for details.");
-                btn.textContent = "Fill LR";
-                btn.style.backgroundColor = "#BF360C";
-            });
-        };
-
-        // Pixel ruler: Measure button toggle handler
-        document.getElementById("measureButton").onclick = function () {
-            measureMode = !measureMode;
-            measurePoint1 = null;
-
-            var btn = document.getElementById("measureButton");
-            var svgEl = document.getElementById('LeftGraphSVG');
-
-            if (measureMode) {
-                btn.style.backgroundColor = "#E65100";
-                btn.textContent = "📏 Measuring…";
-                svgEl.style.cursor = "crosshair";
-            } else {
-                btn.style.backgroundColor = "#795548";
-                btn.textContent = "📏 Measure";
-                svgEl.style.cursor = "";
-                d3.select("#LeftLayoutSVG").selectAll(".measureOverlay").remove();
+            function setStatus(label) {
+                btn.textContent = label;
+                btn.style.backgroundColor = "#616161";
+                btn.style.cursor = "wait";
             }
-        };
+            function resetBtn() {
+                btn.textContent = "Run All";
+                btn.style.backgroundColor = origColor;
+                btn.style.cursor = "pointer";
+            }
+            function onFail(stepName) {
+                return function (xhr, status, error) {
+                    resetBtn();
+                    alert("Pipeline failed at: " + stepName + "\n" + error);
+                };
+            }
+            function render(r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r['door'],
+                               r['windows'], r['indoor'], r['windowsline']);
+            }
 
-        // Export DXF button handler — triggers a browser file download
-        document.getElementById("exportDXFButton").onclick = function () {
-            var dxfBtn = document.getElementById("exportDXFButton");
-            var originalText = dxfBtn.innerHTML;
-            dxfBtn.innerHTML = "⏳ Exporting...";
-            dxfBtn.style.backgroundColor = "#757575";
-            dxfBtn.style.cursor = "wait";
-
-            // Use fetch so we can detect errors vs. a file response
-            fetch("/index/Export_DXF/")
-                .then(function (resp) {
-                    if (!resp.ok) {
-                        // Server returned an error — parse JSON error message
-                        return resp.json().then(function (data) {
-                            throw new Error(data.error || ("HTTP " + resp.status));
-                        });
-                    }
-                    var disposition = resp.headers.get("Content-Disposition") || "";
-                    var match = disposition.match(/filename="?([^"]+)"?/);
-                    var filename = match ? match[1] : "floorplan.dxf";
-                    return resp.blob().then(function (blob) {
-                        return { blob: blob, filename: filename };
-                    });
-                })
-                .then(function (result) {
-                    // Trigger browser download
-                    var url = URL.createObjectURL(result.blob);
-                    var a = document.createElement("a");
-                    a.href = url;
-                    a.download = result.filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    dxfBtn.innerHTML = originalText;
-                    dxfBtn.style.backgroundColor = "#2196F3";
-                    dxfBtn.style.cursor = "pointer";
-                })
-                .catch(function (err) {
-                    dxfBtn.innerHTML = originalText;
-                    dxfBtn.style.backgroundColor = "#2196F3";
-                    dxfBtn.style.cursor = "pointer";
-                    alert("❌ DXF Export failed:\n" + err.message);
-                });
-        };
-
-        // Show Outside toggle handler
-        document.getElementById("showOutsideButton").onclick = function () {
-            var btn = this;
-            var svg = d3.select("#LeftLayoutSVG");
-            var revealed = btn.getAttribute("data-revealed") === "true";
-
-            if (!revealed) {
-                // REVEAL: strip clip-path, highlight rooms that extend outside boundary
-                btn.setAttribute("data-revealed", "true");
-                btn.innerHTML = "👁 Hide Outside";
-                btn.style.backgroundColor = "#c62828";
-
-                // Get boundary bounding box from the clipPath polygon in this SVG
-                var clipPoly = document.querySelector("#LeftLayoutSVG clipPath polygon");
-                var bndXMin = 0, bndXMax = 9999, bndYMin = 0, bndYMax = 9999;
-                if (clipPoly) {
-                    var pts = clipPoly.getAttribute("points").trim().split(/[\s,]+/);
-                    var xs = [], ys = [];
-                    for (var k = 0; k + 1 < pts.length; k += 2) {
-                        xs.push(parseFloat(pts[k]));
-                        ys.push(parseFloat(pts[k + 1]));
-                    }
-                    if (xs.length) {
-                        bndXMin = Math.min.apply(null, xs);
-                        bndXMax = Math.max.apply(null, xs);
-                        bndYMin = Math.min.apply(null, ys);
-                        bndYMax = Math.max.apply(null, ys);
-                    }
+            // Step 1: Generate
+            setStatus("Generating…");
+            var AdjustNewGraph = GetEditGraph(ret['rmpos']);
+            $.get("/index/AdjustGraph/", {
+                'NewGraph': JSON.stringify(AdjustNewGraph),
+                'userRoomID': rooms.toString().split(',')[0],
+                'adptRoomID': roomID
+            }, function (adjust_ret) {
+                render(adjust_ret);
+                d3.select('body').select('#LeftGraphSVG').selectAll('circle').attr("r", 0);
+                for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
+                    var id = "TransCircle_" + adjust_ret['rmpos'][i][4] + "_" + adjust_ret['rmpos'][i][1];
+                    var cs = d3.select("body").select("#LeftGraphSVG").select("#" + id);
+                    if (parseInt(adjust_ret['rmsize'][i][0]) === 0) adjust_ret['rmsize'][i][0] = 4;
+                    cs.attr("r", adjust_ret['rmsize'][i][0]);
                 }
 
-                // Strip clip-path from every room rect and mark rooms extending outside
-                svg.selectAll("rect").each(function () {
-                    var r = d3.select(this);
-                    var cp = r.attr("clip-path");
-                    if (cp) {
-                        r.attr("data-orig-clip", cp).attr("clip-path", null);
+                // Step 2: Optimize
+                setStatus("Optimizing…");
+                $.get("/index/OptimizeLayout/", {}, function (r) {
+                    render(r);
 
-                        var rx = parseFloat(r.attr("x"));
-                        var ry = parseFloat(r.attr("y"));
-                        var rw = parseFloat(r.attr("width"));
-                        var rh = parseFloat(r.attr("height"));
-                        var outside = rx < bndXMin - 0.5 || rx + rw > bndXMax + 0.5 ||
-                                      ry < bndYMin - 0.5 || ry + rh > bndYMax + 0.5;
-                        if (outside) {
-                            svg.append("rect")
-                                .attr("class", "outsideOverlay")
-                                .attr("x", rx).attr("y", ry)
-                                .attr("width", rw).attr("height", rh)
-                                .attr("fill", "rgba(211,47,47,0.08)")
-                                .attr("stroke", "#d32f2f")
-                                .attr("stroke-width", 2)
-                                .attr("stroke-dasharray", "6,3")
-                                .attr("pointer-events", "none");
-                        }
-                    }
-                });
+                    // Step 3: Expand LR
+                    setStatus("Expanding LR…");
+                    $.get("/index/ExpandLivingRoom/", {}, function (r) {
+                        render(r);
 
-            } else {
-                // HIDE: restore clip-paths and remove overlays
-                btn.setAttribute("data-revealed", "false");
-                btn.innerHTML = "👁 Show Outside";
-                btn.style.backgroundColor = "#6A1B9A";
+                        // Step 4: Snap Rooms
+                        setStatus("Snapping…");
+                        $.get("/index/SnapRooms/", {}, function (r) {
+                            render(r);
 
-                svg.selectAll("rect").each(function () {
-                    var r = d3.select(this);
-                    var orig = r.attr("data-orig-clip");
-                    if (orig) {
-                        r.attr("clip-path", orig).attr("data-orig-clip", null);
-                    }
-                });
-                svg.selectAll(".outsideOverlay").remove();
-            }
+                            // Step 5: Fill Gaps
+                            setStatus("Filling Gaps…");
+                            $.get("/index/FillWallGaps/", {}, function (r) {
+                                render(r);
+
+                                // Step 6: Fill LR
+                                setStatus("Filling LR…");
+                                $.get("/index/FillLivingRoom/", {}, function (r) {
+                                    render(r);
+                                    var dxfBtn = document.getElementById("exportDXFButton");
+                                    if (dxfBtn) { dxfBtn.style.display = "block"; }
+                                    resetBtn();
+                                }).fail(onFail("Fill LR"));
+                            }).fail(onFail("Fill Gaps"));
+                        }).fail(onFail("Snap Rooms"));
+                    }).fail(onFail("Expand LR"));
+                }).fail(onFail("Optimize"));
+            }).fail(onFail("Generate"));
         };
 
         // Auto-Adjust button handler

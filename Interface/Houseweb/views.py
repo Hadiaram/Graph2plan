@@ -55,6 +55,54 @@ last_fp_data = None
 last_testname = None
 
 
+def _pin_front_door(fp_data):
+    """
+    Overwrite the FrontDoor (type 15) box in newBox with the exact coordinates
+    of the boundary door segment (boundary[0] → boundary[1]).
+    """
+    if not hasattr(fp_data, 'rType') or not hasattr(fp_data, 'newBox'):
+        return
+    if not hasattr(fp_data, 'boundary') or fp_data.boundary is None:
+        return
+
+    rType    = np.array(fp_data.rType)
+    door_idx = np.where(rType == 15)[0]
+    if len(door_idx) == 0:
+        return
+
+    bnd = np.array(fp_data.boundary)
+    if len(bnd) < 2:
+        return
+
+    p0 = bnd[0]   # [x, y, orient, isNew]
+    p1 = bnd[1]   # [x, y, orient, isNew]
+
+    THICK = 3     # door box thickness in pixels (matches wall thickness)
+
+    # Determine wall orientation from point geometry
+    if abs(float(p0[0]) - float(p1[0])) < 2:
+        # Same x → vertical wall (left or right)
+        x_wall = float(p0[0])
+        y0 = min(float(p0[1]), float(p1[1]))
+        y1 = max(float(p0[1]), float(p1[1]))
+        x0 = x_wall - THICK // 2
+        x1 = x_wall + THICK - THICK // 2
+    else:
+        # Same y → horizontal wall (top or bottom)
+        y_wall = float(p0[1])
+        x0 = min(float(p0[0]), float(p1[0]))
+        x1 = max(float(p0[0]), float(p1[0]))
+        y0 = y_wall - THICK // 2
+        y1 = y_wall + THICK - THICK // 2
+
+    boxes = np.array(fp_data.newBox, dtype=float)
+    for idx in door_idx:
+        boxes[idx] = [x0, y0, x1, y1]
+        print(f"[FRONT DOOR] Pinned room {idx} (type 15) → [{x0:.0f},{y0:.0f},{x1:.0f},{y1:.0f}]")
+
+    fp_data.newBox = boxes.astype(int)
+
+
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
     """
     Python fallback for MATLAB align_fp when MATLAB is not available.
@@ -901,6 +949,7 @@ def AdjustGraph(request):
     global last_fp_data, last_testname
     last_fp_data = fp_end.data
     last_testname = testname
+    _pin_front_door(last_fp_data)
 
     # Populate indoor with room boundary polygons (rBoundary)
     # This makes the Layout view match the thumbnail images

@@ -137,12 +137,20 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     xe = [model.NewIntVar(bx0, bx1, f'xe_{i}') for i in range(K)]
     ye = [model.NewIntVar(by0, by1, f'ye_{i}') for i in range(K)]
 
+    FIXED_TYPES = {15}   # FrontDoor — always stays on the boundary wall
+
     for i in range(K):
         model.Add(xe[i] == x[i] + w[i])
         model.Add(ye[i] == y[i] + h[i])
         # Stay inside boundary
         model.Add(xe[i] <= bx1)
         model.Add(ye[i] <= by1)
+        # Pin fixed-type rooms (FrontDoor) to their initial position
+        if int(types[i]) in FIXED_TYPES:
+            model.Add(x[i] == x0[i])
+            model.Add(y[i] == y0[i])
+            model.Add(w[i] == w0[i])
+            model.Add(h[i] == h0[i])
 
     # --- Identify intentional overlaps from edge predicates ------------------
     # Any two rooms connected by an edge in the graph are neighbours and may

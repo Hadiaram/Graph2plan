@@ -58,75 +58,101 @@ last_testname = None
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
     """
     Python fallback for MATLAB align_fp when MATLAB is not available.
-    Clips boxes to fit within boundary and returns aligned boxes.
+    Scales and translates boxes from their source bounding box to fill
+    the target boundary, then clips to boundary limits.
     """
     boxes = np.array(boxes)
     types = np.array(types)
     boundary = np.array(boundary)
 
-    # Get boundary extents
-    x_min = np.min(boundary[:, 0])
-    x_max = np.max(boundary[:, 0])
-    y_min = np.min(boundary[:, 1])
-    y_max = np.max(boundary[:, 1])
+    # Target boundary extents
+    bx_min = np.min(boundary[:, 0])
+    bx_max = np.max(boundary[:, 0])
+    by_min = np.min(boundary[:, 1])
+    by_max = np.max(boundary[:, 1])
+    margin = 5
 
-    # Clip boxes to be within boundary with small margin (except balconies which should extend outside)
-    margin = 5  # pixels margin from boundary
-    clipped_boxes = []
+    # Identify balconies (type 9 — allowed outside boundary)
+    balcony_mask = np.array(
+        [i < len(types) and int(types[i]) == 9 for i in range(len(boxes))],
+        dtype=bool,
+    )
+    regular_mask = ~balcony_mask
+
+    # Compute scale/offset to map the regular-room bounding box onto the
+    # target boundary (non-uniform scale fills the boundary in both axes,
+    # giving the CP-SAT optimizer a well-distributed starting point).
+    sx = sy = 1.0
+    offset_x = offset_y = 0.0
+    if regular_mask.any():
+        reg = boxes[regular_mask]
+        src_x_min, src_x_max = np.min(reg[:, 0]), np.max(reg[:, 2])
+        src_y_min, src_y_max = np.min(reg[:, 1]), np.max(reg[:, 3])
+        src_w = src_x_max - src_x_min
+        src_h = src_y_max - src_y_min
+
+        tgt_x_min = bx_min + margin
+        tgt_x_max = bx_max - margin
+        tgt_y_min = by_min + margin
+        tgt_y_max = by_max - margin
+
+        sx = (tgt_x_max - tgt_x_min) / src_w if src_w > 0 else 1.0
+        sy = (tgt_y_max - tgt_y_min) / src_h if src_h > 0 else 1.0
+        offset_x = tgt_x_min - src_x_min * sx
+        offset_y = tgt_y_min - src_y_min * sy
+
+    print(f"[FALLBACK ALIGN] scale=({sx:.3f}, {sy:.3f})  offset=({offset_x:.1f}, {offset_y:.1f})")
+
+    scaled_boxes = []
     for i, box in enumerate(boxes):
         if len(box) >= 4:
             x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
 
-            # Balconies (type 9) should extend outside - don't clip them
-            if i < len(types) and int(types[i]) == 9:
-                # Balconies can extend outside, but coordinates must be ordered correctly
+            if balcony_mask[i]:
                 if x2 <= x1:
                     x2 = x1 + 10
                 if y2 <= y1:
                     y2 = y1 + 10
-                clipped_boxes.append([x1, y1, x2, y2])
+                scaled_boxes.append([x1, y1, x2, y2])
             else:
-                # Clip to boundary limits
-                x1 = max(x_min + margin, min(x1, x_max - margin))
-                x2 = max(x_min + margin, min(x2, x_max - margin))
-                y1 = max(y_min + margin, min(y1, y_max - margin))
-                y2 = max(y_min + margin, min(y2, y_max - margin))
+                # Scale then translate
+                nx1 = x1 * sx + offset_x
+                ny1 = y1 * sy + offset_y
+                nx2 = x2 * sx + offset_x
+                ny2 = y2 * sy + offset_y
 
-                # Ensure x2 > x1 and y2 > y1
-                if x2 <= x1:
-                    x2 = x1 + 10
-                if y2 <= y1:
-                    y2 = y1 + 10
+                # Clip to boundary with margin
+                nx1 = max(bx_min + margin, min(nx1, bx_max - margin))
+                nx2 = max(bx_min + margin, min(nx2, bx_max - margin))
+                ny1 = max(by_min + margin, min(ny1, by_max - margin))
+                ny2 = max(by_min + margin, min(ny2, by_max - margin))
 
-                clipped_boxes.append([x1, y1, x2, y2])
+                if nx2 <= nx1:
+                    nx2 = nx1 + 10
+                if ny2 <= ny1:
+                    ny2 = ny1 + 10
+
+                scaled_boxes.append([nx1, ny1, nx2, ny2])
         else:
-            clipped_boxes.append(box)
+            scaled_boxes.append(list(box))
 
-    boxes = np.array(clipped_boxes)
+    boxes = np.array(scaled_boxes)
 
-    # Simple ordering: sort by y-coordinate (top to bottom), then x-coordinate (left to right)
+    # Ordering: top-to-bottom, left-to-right (MATLAB 1-indexed)
     if len(boxes) > 0:
-        centers_x = np.array([(boxes[i][0] + boxes[i][2]) / 2 for i in range(len(boxes))])
-        centers_y = np.array([(boxes[i][1] + boxes[i][3]) / 2 for i in range(len(boxes))])
-        order = np.argsort(centers_y * 1000 + centers_x) + 1  # MATLAB uses 1-indexing
+        centers_x = (boxes[:, 0] + boxes[:, 2]) / 2
+        centers_y = (boxes[:, 1] + boxes[:, 3]) / 2
+        order = np.argsort(centers_y * 1000 + centers_x) + 1
         order = order.reshape(-1, 1)
     else:
         order = np.array([[]], dtype=int)
 
-    # Generate simple room boundaries (just bounding boxes)
+    # Room boundary polygons (bounding rectangles)
     room_boundaries = []
     for box in boxes:
         if len(box) >= 4:
             x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
-            # Create a rectangle as the room boundary
-            boundary_poly = [
-                [x1, y1],
-                [x2, y1],
-                [x2, y2],
-                [x1, y2],
-                [x1, y1]
-            ]
-            room_boundaries.append(boundary_poly)
+            room_boundaries.append([[x1, y1], [x2, y1], [x2, y2], [x1, y2], [x1, y1]])
         else:
             room_boundaries.append([[]])
 
@@ -970,7 +996,7 @@ def OptimizeLayout(request):
         last_fp_data.rType,
         last_fp_data.rEdge,
         boundary=last_fp_data.boundary,
-        timeout=5.0,
+        timeout=15.0,
     )
     print(f"[OPTIMIZER] Status: {opt_status}")
 

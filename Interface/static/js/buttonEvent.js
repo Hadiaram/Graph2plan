@@ -1351,6 +1351,8 @@ function CreateLeftGraph(rooms, roomID) {
                 if (fillLRBtn) { fillLRBtn.style.display = "block"; }
                 var logBndBtn = document.getElementById("logBoundariesButton");
                 if (logBndBtn) { logBndBtn.style.display = "block"; }
+                var logGraphBtn = document.getElementById("logGraphButton");
+                if (logGraphBtn) { logGraphBtn.style.display = "block"; }
                 var measureBtn = document.getElementById("measureButton");
                 if (measureBtn) { measureBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
@@ -1626,7 +1628,58 @@ function CreateLeftGraph(rooms, roomID) {
             });
         };
 
-        // Export DXF button handler
+        // Log Graph button — shows room connections from rEdge in console + alert
+        document.getElementById("logGraphButton").onclick = function () {
+            var btn = document.getElementById("logGraphButton");
+            btn.innerHTML = "Loading...";
+            btn.style.backgroundColor = "#757575";
+
+            $.get("/index/Log_Graph/", {}, function (data) {
+                btn.innerHTML = "Log Graph";
+                btn.style.backgroundColor = "#F57F17";
+
+                if (!data.success) {
+                    alert("❌ Log Graph failed:\n" + data.error);
+                    return;
+                }
+
+                // Print full detail to browser console
+                console.log("=== GRAPH LOG ===");
+                console.log("Rooms (" + data.room_count + "):");
+                data.rooms.forEach(function (r) {
+                    console.log("  [" + r.index + "] type=" + r.type + "  " + r.name);
+                });
+                console.log("Edges (" + data.edge_count + "):");
+                data.edges.forEach(function (e) {
+                    console.log("  [" + e.u + "] " + e.u_name + "  <-->  [" + e.v + "] " + e.v_name + "  (edge_type=" + e.edge_type + ")");
+                });
+                if (data.boxes && data.boxes.length) {
+                    console.log("Boxes:");
+                    data.boxes.forEach(function (b) {
+                        console.log("  [" + b.index + "] x0=" + b.x0 + " y0=" + b.y0 + " x1=" + b.x1 + " y1=" + b.y1);
+                    });
+                }
+
+                // Build alert summary
+                var roomLines = data.rooms.map(function (r) {
+                    return "  [" + r.index + "] " + r.name + " (type " + r.type + ")";
+                }).join("\n");
+                var edgeLines = data.edges.map(function (e) {
+                    return "  [" + e.u + "] " + e.u_name + " <-> [" + e.v + "] " + e.v_name;
+                }).join("\n");
+
+                alert("=== GRAPH ===\n\nROOMS (" + data.room_count + "):\n" + roomLines +
+                      "\n\nEDGES (" + data.edge_count + "):\n" + edgeLines +
+                      "\n\n(Full box coords in browser console)");
+
+            }).fail(function (xhr, status, error) {
+                btn.innerHTML = "Log Graph";
+                btn.style.backgroundColor = "#F57F17";
+                alert("❌ Log Graph request failed:\n" + error);
+            });
+        };
+
+        // Export DXF button handler — triggers a browser file download
         document.getElementById("exportDXFButton").onclick = function () {
             var dxfBtn = document.getElementById("exportDXFButton");
             var originalText = dxfBtn.innerHTML;
@@ -1634,28 +1687,42 @@ function CreateLeftGraph(rooms, roomID) {
             dxfBtn.style.backgroundColor = "#757575";
             dxfBtn.style.cursor = "wait";
 
-            $.get("/index/Export_DXF/", {}, function (data) {
-                dxfBtn.innerHTML = originalText;
-                dxfBtn.style.backgroundColor = "#2196F3";
-                dxfBtn.style.cursor = "pointer";
-
-                if (data.success) {
-                    alert("✅ DXF Export Complete!\n\nFile: " + data.filename +
-                          "\nSize: " + data.size_kb + " KB\nRooms: " + data.room_count);
-                } else {
-                    alert("❌ DXF Export failed:\n" + data.error);
-                }
-            }).fail(function (xhr, status, error) {
-                dxfBtn.innerHTML = originalText;
-                dxfBtn.style.backgroundColor = "#2196F3";
-                dxfBtn.style.cursor = "pointer";
-                try {
-                    var resp = JSON.parse(xhr.responseText);
-                    alert("❌ DXF Export failed:\n" + (resp.error || error));
-                } catch (e) {
-                    alert("❌ DXF Export request failed:\n" + error);
-                }
-            });
+            // Use fetch so we can detect errors vs. a file response
+            fetch("/index/Export_DXF/")
+                .then(function (resp) {
+                    if (!resp.ok) {
+                        // Server returned an error — parse JSON error message
+                        return resp.json().then(function (data) {
+                            throw new Error(data.error || ("HTTP " + resp.status));
+                        });
+                    }
+                    var disposition = resp.headers.get("Content-Disposition") || "";
+                    var match = disposition.match(/filename="?([^"]+)"?/);
+                    var filename = match ? match[1] : "floorplan.dxf";
+                    return resp.blob().then(function (blob) {
+                        return { blob: blob, filename: filename };
+                    });
+                })
+                .then(function (result) {
+                    // Trigger browser download
+                    var url = URL.createObjectURL(result.blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = result.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    dxfBtn.innerHTML = originalText;
+                    dxfBtn.style.backgroundColor = "#2196F3";
+                    dxfBtn.style.cursor = "pointer";
+                })
+                .catch(function (err) {
+                    dxfBtn.innerHTML = originalText;
+                    dxfBtn.style.backgroundColor = "#2196F3";
+                    dxfBtn.style.cursor = "pointer";
+                    alert("❌ DXF Export failed:\n" + err.message);
+                });
         };
 
         // Show Outside toggle handler

@@ -28,7 +28,7 @@ except ImportError:
 # Try to import DXF export
 HAS_DXF_EXPORT = False
 try:
-    from Houseweb.dxf_export import save_floorplan_dxf
+    from Houseweb.dxf_export import save_floorplan_dxf, build_floorplan_dxf_bytes
     HAS_DXF_EXPORT = True
     print("[Init] DXF export module loaded successfully ✓")
 except ImportError as e:
@@ -39,7 +39,7 @@ except ImportError as e:
 ENABLE_AUTO_DXF_EXPORT = False  # Set to True to auto-save DXF on every save
 DXF_SCALE = 1.0                 # Scale factor (1.0 = pixels, 0.01 = cm)
 DXF_WALL_THICKNESS = 3.0        # Wall thickness in drawing units
-DXF_SAVE_PATH = r"C:\Users\hmbashir\source\DXF Floor Plans"
+DXF_SAVE_PATH = "/mnt/c/Users/hmbashir/source/DXF Floor Plans"
 
 global test_data, test_data_topk, testNameList, trainNameList
 global train_data, trainTF, train_data_eNum, train_data_rNum
@@ -2000,10 +2000,10 @@ def retrieve_bf(tf_trainsub, datum, k=20):
 
 def Export_DXF(request):
     """
-    Manual DXF export endpoint - triggered by button click.
-    Loads from the saved .mat file (same approach as ai-training-branch).
+    Manual DXF export endpoint — streams the DXF file directly to the browser
+    as a download (no server-side file path needed).
     """
-    global last_testname
+    global last_fp_data, last_testname
 
     try:
         if not HAS_DXF_EXPORT:
@@ -2012,27 +2012,13 @@ def Export_DXF(request):
                 "error": "DXF export not available. Please install ezdxf: pip install ezdxf"
             }, status=500)
 
-        if not last_testname:
+        if last_fp_data is None or not last_testname:
             return JsonResponse({
                 "success": False,
                 "error": "No layout generated yet. Click Generate first."
             }, status=400)
 
-        # Construct mat file path (saved by AdjustGraph/OptimizeLayout/ExpandLivingRoom)
         base_id = last_testname.split(',')[0].split('.')[0]
-        mat_path = f"./static/{base_id}.mat"
-
-        if not os.path.exists(mat_path):
-            return JsonResponse({
-                "success": False,
-                "error": f"Floor plan file not found: {mat_path}. Click Generate first."
-            }, status=404)
-
-        print(f"[DXF Export] Loading {mat_path}...")
-        data = sio.loadmat(mat_path)
-        fp_data = data['data'][0, 0]
-        print(f"[DXF Export] Available fields: {fp_data.dtype.names}")
-
         custom_scale = request.GET.get("scale", None)
         custom_filename = request.GET.get("filename", None)
 
@@ -2040,38 +2026,24 @@ def Export_DXF(request):
         if not dxf_filename.endswith('.dxf'):
             dxf_filename += '.dxf'
 
-        os.makedirs(DXF_SAVE_PATH, exist_ok=True)
-        dxf_path = os.path.join(DXF_SAVE_PATH, dxf_filename)
         scale = float(custom_scale) if custom_scale else DXF_SCALE
 
-        print(f"[DXF Export] Exporting to {dxf_path} (scale={scale})...")
-        success = save_floorplan_dxf(
-            fp_data, dxf_path,
+        print(f"[DXF Export] Building DXF for {dxf_filename} (scale={scale})...")
+        dxf_bytes = build_floorplan_dxf_bytes(
+            last_fp_data,
             scale=scale,
             wall_thickness=DXF_WALL_THICKNESS,
             include_labels=True,
-            include_dimensions=False
+            include_dimensions=False,
         )
 
-        if success:
-            file_size = os.path.getsize(dxf_path) / 1024
-            room_count = 0
-            if 'rType' in fp_data.dtype.names:
-                room_count = len(np.array(fp_data['rType']).flatten())
-            print(f"[DXF Export] ✓ Exported {dxf_filename} ({file_size:.1f} KB, {room_count} rooms)")
-            return JsonResponse({
-                "success": True,
-                "filename": dxf_filename,
-                "path": dxf_path,
-                "size_kb": round(file_size, 1),
-                "scale": scale,
-                "room_count": room_count,
-            })
-        else:
-            return JsonResponse({
-                "success": False,
-                "error": "DXF export failed — check server console for details"
-            }, status=500)
+        room_count = len(np.array(last_fp_data.rType).flatten()) if hasattr(last_fp_data, 'rType') else 0
+        print(f"[DXF Export] ✓ Built {dxf_filename} ({len(dxf_bytes)//1024:.1f} KB, {room_count} rooms)")
+
+        response = HttpResponse(dxf_bytes, content_type='application/dxf')
+        response['Content-Disposition'] = f'attachment; filename="{dxf_filename}"'
+        response['X-DXF-Filename'] = dxf_filename
+        return response
 
     except Exception as e:
         import traceback
@@ -2279,6 +2251,66 @@ def Log_Boundaries(request):
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(e),
                              "traceback": traceback.format_exc()}, status=500)
+
+
+def Log_Graph(request):
+    """Return the room graph (rEdge + rType) as JSON for the Log Graph button."""
+    global last_fp_data
+    try:
+        if last_fp_data is None:
+            return JsonResponse({"success": False, "error": "No layout generated yet."})
+
+        import model.utils as mdul
+
+        rType_raw = getattr(last_fp_data, 'rType', None)
+        if rType_raw is None:
+            return JsonResponse({"success": False, "error": "rType not found on fp_data."})
+        rType = np.array(rType_raw).flatten().astype(int)
+
+        def room_name(t):
+            return mdul.room_label[t][1] if 0 <= t < len(mdul.room_label) else f"Unknown({t})"
+
+        rooms = [{"index": int(i), "type": int(t), "name": room_name(int(t))}
+                 for i, t in enumerate(rType)]
+
+        rEdge_raw = getattr(last_fp_data, 'rEdge', None)
+        if rEdge_raw is None:
+            return JsonResponse({"success": False,
+                                 "error": "rEdge not found on fp_data.", "rooms": rooms})
+        edges_arr = np.array(rEdge_raw)
+
+        edges = []
+        for row in edges_arr:
+            u, v = int(row[0]), int(row[1])
+            edge_type = int(row[2]) if len(row) > 2 else -1
+            edges.append({
+                "u": u, "u_name": room_name(int(rType[u])) if u < len(rType) else "?",
+                "v": v, "v_name": room_name(int(rType[v])) if v < len(rType) else "?",
+                "edge_type": edge_type,
+            })
+
+        newBox_raw = getattr(last_fp_data, 'newBox', None)
+        boxes = []
+        if newBox_raw is not None:
+            for i, b in enumerate(newBox_raw):
+                arr = np.array(b, dtype=float).flatten()[:4]
+                boxes.append({"index": i,
+                              "x0": round(float(arr[0])), "y0": round(float(arr[1])),
+                              "x1": round(float(arr[2])), "y1": round(float(arr[3]))})
+
+        return JsonResponse({
+            "success": True,
+            "room_count": len(rooms),
+            "rooms": rooms,
+            "edge_count": len(edges),
+            "edges": edges,
+            "boxes": boxes,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 if __name__ == "__main__":

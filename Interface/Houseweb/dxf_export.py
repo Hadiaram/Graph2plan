@@ -83,11 +83,12 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
         bool: True if successful, False if ezdxf not available
     """
     if not HAS_EZDXF:
-        print("ERROR: ezdxf not installed. Cannot export to DXF.")
-        print("Install with: pip install ezdxf")
-        return False
+        raise RuntimeError("ezdxf not installed. Install with: pip install ezdxf")
 
-    try:
+    print(f"[DXF] save_floorplan_dxf called, fp_data type={type(fp_data).__name__}", flush=True)
+
+    # No outer try/except — let exceptions propagate to Export_DXF for proper error reporting
+    if True:
         # Create new DXF document (AutoCAD 2018 format)
         doc = ezdxf.new('R2018', setup=True)
         msp = doc.modelspace()
@@ -131,14 +132,12 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
             room_labels = _get_room_labels(fp_data)
 
             # Clip each room to the exterior boundary only
-            # (no room-vs-room subtraction — CAD handles overlapping lines fine)
             boundary_array = _get_field(fp_data, 'boundary')
             if boundary_array is not None:
                 clipped_rBoundary = _clip_room_polygons(rBoundary, np.array(boundary_array), None)
             else:
                 clipped_rBoundary = list(rBoundary)
 
-            # Draw all rooms in index order
             rooms_drawn = 0
             for i, rb in enumerate(clipped_rBoundary):
                 if rb is None:
@@ -302,37 +301,205 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
             print(f"[DXF] Drew {window_count} windows")
 
         # 5. Draw door (first two boundary points)
+        print(f"[DXF] Section 5: drawing front door...", flush=True)
         boundary = _get_field(fp_data, 'boundary')
         if boundary is not None:
             boundary = np.array(boundary)
             if len(boundary) >= 2:
-                door_p1 = (float(boundary[0][0]) * scale, float(boundary[0][1]) * scale)
-                door_p2 = (float(boundary[1][0]) * scale, float(boundary[1][1]) * scale)
+                try:
+                    door_p1 = (float(boundary[0][0]) * scale, float(boundary[0][1]) * scale)
+                    door_p2 = (float(boundary[1][0]) * scale, float(boundary[1][1]) * scale)
 
-                # Draw door as special line
-                msp.add_line(
-                    door_p1, door_p2,
-                    dxfattribs={
-                        'layer': 'DOORS',
-                        'lineweight': 35  # Extra thick for doors
-                    }
-                )
+                    msp.add_line(door_p1, door_p2,
+                                 dxfattribs={'layer': 'DOORS', 'lineweight': 35})
 
-                # Add door arc (swing indicator)
-                door_angle = np.arctan2(door_p2[1] - door_p1[1],
-                                       door_p2[0] - door_p1[0])
-                door_angle_deg = np.degrees(door_angle)
+                    door_radius = np.linalg.norm([door_p2[0] - door_p1[0],
+                                                  door_p2[1] - door_p1[1]])
+                    if door_radius > 0:
+                        door_angle_deg = np.degrees(
+                            np.arctan2(door_p2[1] - door_p1[1], door_p2[0] - door_p1[0]))
+                        msp.add_arc(center=door_p1, radius=door_radius,
+                                    start_angle=door_angle_deg,
+                                    end_angle=door_angle_deg + 90,
+                                    dxfattribs={'layer': 'DOORS'})
+                    print(f"[DXF] Drew door at entry", flush=True)
+                except Exception as _door_err:
+                    print(f"[DXF] Warning: front door drawing failed: {_door_err}", flush=True)
 
-                msp.add_arc(
-                    center=door_p1,
-                    radius=np.linalg.norm([door_p2[0] - door_p1[0],
-                                          door_p2[1] - door_p1[1]]),
-                    start_angle=door_angle_deg,
-                    end_angle=door_angle_deg + 90,
-                    dxfattribs={'layer': 'DOORS'}
-                )
+        # 5b. Interior doors — one per graph edge.
+        #
+        # For each edge (u, v) in rEdge, score all 4 candidate face-to-face
+        # walls by overlap / (gap + 1).  The highest score wins regardless of
+        # whether the boxes touch or one sits inside the other (e.g. LR after
+        # fill_living_room).  No Shapely needed.
+        rEdge_data  = _get_field(fp_data, 'rEdge')
+        newBox_data = _get_field(fp_data, 'newBox')
+        rType_data  = _get_field(fp_data, 'rType')
 
-                print(f"[DXF] Drew door at entry")
+        if rEdge_data is not None and newBox_data is not None:
+            _edges = np.array(rEdge_data)
+            _boxes = [np.array(b, dtype=float).flatten()[:4] for b in newBox_data]
+            _types = np.array(rType_data).flatten().astype(int) if rType_data is not None else None
+            _K     = len(_boxes)
+            _EXCL  = {12, 13, 14, 15}
+            _DOOR  = 30.0   # max door width in pixels
+            _seen  = set()
+            _found = 0
+            _skipped = 0
+            _failed  = 0
+
+            print(f"[DXF] Interior doors: processing {len(_edges)} graph edges, "
+                  f"{_K} boxes", flush=True)
+
+            for _e in _edges:
+                _u, _v = int(_e[0]), int(_e[1])
+                if _u >= _K or _v >= _K or _u == _v:
+                    continue
+                _pair = (min(_u, _v), max(_u, _v))
+                if _pair in _seen:
+                    continue
+                _seen.add(_pair)
+
+                if _types is not None and (_types[_u] in _EXCL or _types[_v] in _EXCL):
+                    _skipped += 1
+                    continue
+
+                _bu = _boxes[_u]   # x0, y0, x1, y1
+                _bv = _boxes[_v]
+
+                # Detect if one box is entirely inside the other.
+                # This happens after fill_living_room expands LR to the full
+                # bounding box — the normal gap-based candidates break because
+                # LR's faces end up at the exterior boundary.
+                _EPS_IN  = 2.0
+                _u_in_v  = (_bu[0] >= _bv[0] - _EPS_IN and _bu[2] <= _bv[2] + _EPS_IN and
+                             _bu[1] >= _bv[1] - _EPS_IN and _bu[3] <= _bv[3] + _EPS_IN)
+                _v_in_u  = (_bv[0] >= _bu[0] - _EPS_IN and _bv[2] <= _bu[2] + _EPS_IN and
+                             _bv[1] >= _bu[1] - _EPS_IN and _bv[3] <= _bu[3] + _EPS_IN)
+
+                _best       = None
+                _best_score = -1.0
+
+                if _u_in_v or _v_in_u:
+                    # One box contains the other.  Use the *inner* box's four
+                    # faces as candidates and keep only faces that:
+                    #   (a) do NOT touch the outer box's boundary (exterior wall)
+                    #   (b) have no other room directly adjacent to them
+                    # The surviving face opens onto the visible interior area.
+                    _inner     = _bu if _u_in_v else _bv
+                    _inner_idx = _u  if _u_in_v else _v
+                    _outer     = _bv if _u_in_v else _bu
+                    _outer_idx = _v  if _u_in_v else _u
+                    _EPS_ADJ   = 3.0
+
+                    for _fkind, _fcoord, _fs0, _fs1 in [
+                        ('vert',  _inner[0], _inner[1], _inner[3]),  # left
+                        ('vert',  _inner[2], _inner[1], _inner[3]),  # right
+                        ('horiz', _inner[1], _inner[0], _inner[2]),  # top
+                        ('horiz', _inner[3], _inner[0], _inner[2]),  # bottom
+                    ]:
+                        # (a) skip faces flush with the outer (= exterior) boundary
+                        if _fkind == 'vert':
+                            if (abs(_fcoord - _outer[0]) < _EPS_ADJ or
+                                    abs(_fcoord - _outer[2]) < _EPS_ADJ):
+                                continue
+                        else:
+                            if (abs(_fcoord - _outer[1]) < _EPS_ADJ or
+                                    abs(_fcoord - _outer[3]) < _EPS_ADJ):
+                                continue
+
+                        # (b) collect blocked intervals, find the longest unblocked
+                        #     portion — a partial blocker doesn't disqualify the face
+                        _blk_ivs = []
+                        for _k in range(_K):
+                            if _k == _inner_idx or _k == _outer_idx:
+                                continue
+                            if _types is not None and _types[_k] in _EXCL:
+                                continue
+                            _bk = _boxes[_k]
+                            if _fkind == 'vert':
+                                if (abs(_bk[0] - _fcoord) < _EPS_ADJ or
+                                        abs(_bk[2] - _fcoord) < _EPS_ADJ):
+                                    _s = max(_bk[1], _fs0)
+                                    _e = min(_bk[3], _fs1)
+                                    if _e > _s:
+                                        _blk_ivs.append((_s, _e))
+                            else:
+                                if (abs(_bk[1] - _fcoord) < _EPS_ADJ or
+                                        abs(_bk[3] - _fcoord) < _EPS_ADJ):
+                                    _s = max(_bk[0], _fs0)
+                                    _e = min(_bk[2], _fs1)
+                                    if _e > _s:
+                                        _blk_ivs.append((_s, _e))
+
+                        _ub_ivs  = _subtract_intervals((_fs0, _fs1), _blk_ivs)
+                        _best_ub = max(_ub_ivs, key=lambda _iv: _iv[1] - _iv[0]) if _ub_ivs else None
+
+                        if _best_ub is None or (_best_ub[1] - _best_ub[0]) < 10:
+                            continue
+
+                        _ov0_face, _ov1_face = _best_ub
+                        _score = _ov1_face - _ov0_face
+                        if _score > _best_score:
+                            _best_score = _score
+                            _best = (_fkind, _fcoord, _ov0_face, _ov1_face)
+
+                else:
+                    # Normal case: four candidate face-to-face walls, scored by
+                    # overlap / (gap + 1).
+                    for _kind, _coord, _s0u, _s1u, _s0v, _s1v, _gap in [
+                        # u's right  meets v's left
+                        ('vert',  _bv[0], _bu[1], _bu[3], _bv[1], _bv[3], abs(_bu[2] - _bv[0])),
+                        # v's right  meets u's left
+                        ('vert',  _bv[2], _bu[1], _bu[3], _bv[1], _bv[3], abs(_bv[2] - _bu[0])),
+                        # u's bottom meets v's top
+                        ('horiz', _bv[1], _bu[0], _bu[2], _bv[0], _bv[2], abs(_bu[3] - _bv[1])),
+                        # v's bottom meets u's top
+                        ('horiz', _bv[3], _bu[0], _bu[2], _bv[0], _bv[2], abs(_bv[3] - _bu[1])),
+                    ]:
+                        _ov = max(0.0, min(_s1u, _s1v) - max(_s0u, _s0v))
+                        if _ov > 0:
+                            _score = _ov / (_gap + 1.0)
+                            if _score > _best_score:
+                                _best_score = _score
+                                _best = (_kind, _coord,
+                                         max(_s0u, _s0v), min(_s1u, _s1v))
+
+                if _best is None:
+                    _failed += 1
+                    continue
+
+                _kind, _coord, _ov0, _ov1 = _best
+                _dw  = min(_DOOR, (_ov1 - _ov0) * 0.7)
+                _mid = (_ov0 + _ov1) / 2.0
+
+                if _kind == 'vert':
+                    _p1  = (_coord * scale, (_mid - _dw/2) * scale)
+                    _p2  = (_coord * scale, (_mid + _dw/2) * scale)
+                    _rad = _dw * scale
+                    msp.add_line(_p1, _p2,
+                                 dxfattribs={"layer": "DOORS", "lineweight": 35})
+                    msp.add_line(_p1, (_p1[0] + _rad, _p1[1]),
+                                 dxfattribs={"layer": "DOORS", "lineweight": 18})
+                    msp.add_arc(center=_p1, radius=_rad,
+                                start_angle=0.0, end_angle=90.0,
+                                dxfattribs={"layer": "DOORS"})
+                else:
+                    _p1  = ((_mid - _dw/2) * scale, _coord * scale)
+                    _p2  = ((_mid + _dw/2) * scale, _coord * scale)
+                    _rad = _dw * scale
+                    msp.add_line(_p1, _p2,
+                                 dxfattribs={"layer": "DOORS", "lineweight": 35})
+                    msp.add_line(_p1, (_p1[0], _p1[1] + _rad),
+                                 dxfattribs={"layer": "DOORS", "lineweight": 18})
+                    msp.add_arc(center=_p1, radius=_rad,
+                                start_angle=0.0, end_angle=90.0,
+                                dxfattribs={"layer": "DOORS"})
+                _found += 1
+
+            print(f"[DXF] Interior doors: {_found} drawn, {_skipped} skipped "
+                  f"(wall/ext type), {_failed} no overlap", flush=True)
+
 
         # 6. Add optional dimensions
         if include_dimensions:
@@ -366,11 +533,30 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
         print(f"[DXF] Scale: {scale}, Wall thickness: {wall_thickness * scale}")
         return True
 
-    except Exception as e:
-        print(f"[DXF] ERROR saving floor plan: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+
+def build_floorplan_dxf_bytes(fp_data, scale=1.0, wall_thickness=3.0,
+                               include_labels=True, include_dimensions=False):
+    """
+    Build a DXF document for fp_data and return its content as bytes.
+    Raises an exception on failure (no try/except — let caller handle it).
+    """
+    import io
+    import tempfile, os
+    # Reuse save_floorplan_dxf by writing to a temp file, then read back bytes
+    with tempfile.NamedTemporaryFile(suffix='.dxf', delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        save_floorplan_dxf(fp_data, tmp_path, scale=scale,
+                           wall_thickness=wall_thickness,
+                           include_labels=include_labels,
+                           include_dimensions=include_dimensions)
+        with open(tmp_path, 'rb') as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def _get_room_labels(fp_data):
@@ -391,7 +577,8 @@ def _get_room_labels(fp_data):
     elif hasattr(fp_data, 'rType') and fp_data.rType is not None:
         has_rType = True
         rType_data = fp_data.rType
-        print(f"[DXF Debug] rType found via attribute, shape: {rType_data.shape}")
+        shape_info = getattr(rType_data, 'shape', type(rType_data).__name__)
+        print(f"[DXF Debug] rType found via attribute, shape/type: {shape_info}")
 
     if has_rType and rType_data is not None:
         try:
@@ -421,6 +608,29 @@ def _get_room_labels(fp_data):
         print(f"[DXF Debug] rType NOT found in fp_data!")
 
     return room_labels
+
+
+def _subtract_intervals(total, blocks):
+    """Return list of (start, end) intervals remaining after removing blocks from total."""
+    if not blocks:
+        return [total]
+    merged = sorted(blocks)
+    # merge overlapping blocks
+    fused = [list(merged[0])]
+    for s, e in merged[1:]:
+        if s <= fused[-1][1]:
+            fused[-1][1] = max(fused[-1][1], e)
+        else:
+            fused.append([s, e])
+    result = []
+    cur = total[0]
+    for s, e in fused:
+        if s > cur:
+            result.append((cur, min(s, total[1])))
+        cur = max(cur, e)
+    if cur < total[1]:
+        result.append((cur, total[1]))
+    return result
 
 
 def _calculate_centroid(polygon):

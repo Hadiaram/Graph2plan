@@ -1246,67 +1246,6 @@ function CreateLeftGraph(rooms, roomID) {
         // Show Auto-Adjust button when graph is transferred
         document.getElementById("AutoAdjust").style.display = "block";
 
-        // Show Floor Plan visualization button
-        document.getElementById("ShowFloorPlan").style.display = "block";
-        document.getElementById("ShowFloorPlan").onclick = function () {
-            console.log("Showing current floor plan...");
-
-            // Get current graph state (edited nodes/edges)
-            var currentGraph = GetEditGraph(ret['rmpos']);
-
-            console.log("Current graph to send:", currentGraph);
-            console.log("userRoomID:", rooms.toString().split(',')[0]);
-            console.log("adptRoomID:", roomID);
-
-            // Send to backend to regenerate floor plan based on current graph using AI model
-            console.log("\n" + "=".repeat(80));
-            console.log("🚀 [FRONTEND] Show Floor Plan - Sending AdjustGraph request");
-            console.log("=".repeat(80));
-            console.log("📤 Request parameters:");
-            console.log("   → userRoomID:", rooms.toString().split(',')[0]);
-            console.log("   → adptRoomID:", roomID);
-            console.log("   → NewGraph:", currentGraph);
-            console.log("   → NewGraph structure: nodes=" + (currentGraph[0] ? currentGraph[0].length : 0) + 
-                        ", edges=" + (currentGraph[1] ? currentGraph[1].length : 0) +
-                        ", oldNodes=" + (currentGraph[2] ? currentGraph[2].length : 0));
-            
-            var requestStartTime = performance.now();
-            $.get("/index/AdjustGraph/", {
-                'NewGraph': JSON.stringify(currentGraph),
-                'userRoomID': rooms.toString().split(',')[0],
-                'adptRoomID': roomID
-            }, function (adjust_ret) {
-                var requestEndTime = performance.now();
-                console.log("\n✅ [FRONTEND] AdjustGraph response received");
-                console.log("   ⏱️  Request time: " + (requestEndTime - requestStartTime).toFixed(2) + "ms");
-                console.log("📥 Response data:");
-                console.log("   → roomret entries:", adjust_ret['roomret'] ? adjust_ret['roomret'].length : 0);
-                console.log("   → hsedge entries:", adjust_ret['hsedge'] ? adjust_ret['hsedge'].length : 0);
-                console.log("   → exterior:", adjust_ret['exterior'] ? "present" : "missing");
-                console.log("   → door:", adjust_ret['door'] ? "present" : "missing");
-                console.log("   → Full response:", adjust_ret);
-
-                // Use the AI-generated boxes from current graph
-                console.log("🎨 [FRONTEND] Rendering floor plan with CreateLeftFloorPlan...");
-                CreateLeftFloorPlan(adjust_ret['roomret'], adjust_ret['exterior'], adjust_ret['door']);
-                console.log("✅ [FRONTEND] Floor plan rendering completed");
-                console.log("=".repeat(80) + "\n");
-            }).fail(function(xhr, status, error) {
-                var requestEndTime = performance.now();
-                console.error("\n" + "=".repeat(80));
-                console.error("❌ [FRONTEND] AdjustGraph request FAILED!");
-                console.error("=".repeat(80));
-                console.error("   ⏱️  Request time: " + (requestEndTime - requestStartTime).toFixed(2) + "ms");
-                console.error("   Status:", status);
-                console.error("   Error:", error);
-                console.error("   HTTP Status:", xhr.status);
-                console.error("   Response Text:", xhr.responseText);
-                console.error("   Response Headers:", xhr.getAllResponseHeaders());
-                console.error("=".repeat(80) + "\n");
-                alert("Error regenerating floor plan. Check browser console for details.");
-            });
-        };
-
         document.getElementById("Generate").onclick = function () {
             var AdjustNewGraph = [];
             AdjustNewGraph = GetEditGraph(ret['rmpos']);
@@ -1720,44 +1659,6 @@ function CreateLeftGraph(rooms, roomID) {
         });
         */
 
-        // downLoad button handler (moved outside of commented AJAX callback)
-        document.getElementById("downLoad").onclick = function () {
-                var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
-                if (arr = document.cookie.match(reg))
-                    hsname = arr[2];
-                console.log(focus_rect);
-                if (document.getElementById("graph").checked == true)  {
-                    var link = document.createElement('a');
-                    link.href = "../static/" + hsname.split(".")[0] + ".mat";
-                    var event = document.createEvent('MouseEvents');
-                    event.initMouseEvent('click', true, false, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
-                    link.dispatchEvent(event);
-                } else {
-                    console.log("editing");
-                    var NewLay = [];
-                    NewLay = GetEditLayout();
-                    var newGraph = [];
-                    newGraph = GetEditGraph(ret['rmpos']);
-                    $.get("/index/Save_Editbox/", {
-                        'NewLay': JSON.stringify(NewLay),
-                        'NewGraph': JSON.stringify(newGraph),
-                        'userRoomID': rooms.toString().split(',')[0],
-                        'adptRoomID': roomID
-                    }, function (flag) {
-
-                            var link = document.createElement('a');
-                            link.href = "../static/" + hsname.split(".")[0] + ".png.mat";
-                            var event = document.createEvent('MouseEvents');
-                            event.initMouseEvent('click', true, false, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
-                            link.dispatchEvent(event);
-
-
-
-
-                    });
-                }
-
-            }
         // }); // COMMENTED OUT: This was closing the automatic AdjustGraph AJAX call above
 
     });

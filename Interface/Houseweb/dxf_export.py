@@ -28,8 +28,8 @@ except ImportError:
 # Try to import shapely for polygon clipping
 HAS_SHAPELY = False
 try:
-    from shapely.geometry import Polygon, MultiPolygon
-    from shapely.ops import unary_union
+    from shapely.geometry import Polygon, MultiPolygon #type: ignore
+    from shapely.ops import unary_union #type: ignore
     HAS_SHAPELY = True
 except ImportError:
     warnings.warn(

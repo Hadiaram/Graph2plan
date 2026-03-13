@@ -1086,6 +1086,7 @@ def ExpandLivingRoom(request):
         last_fp_data.newBox,
         last_fp_data.rType,
         last_fp_data.boundary,
+        edges=last_fp_data.rEdge,
     )
     print("[EXPAND LR] Done.")
 

@@ -1617,8 +1617,9 @@ function CreateLeftGraph(rooms, roomID) {
             }
         };
 
-        // Run All — runs the full pipeline: Generate → Optimize → Expand LR →
-        //           Snap Rooms → Fill Gaps → Fill LR in sequence.
+        // Run All — runs the full pipeline:
+        //   Generate → Optimize → Snap Rooms → Expand LR → Snap Rooms →
+        //   Align Walls → Fill Gaps → Fill LR → Fix Rooms
         document.getElementById("runPipelineButton").onclick = function () {
             var btn = document.getElementById("runPipelineButton");
             var origColor = "#1565C0";
@@ -1666,32 +1667,50 @@ function CreateLeftGraph(rooms, roomID) {
                 $.get("/index/OptimizeLayout/", {}, function (r) {
                     render(r);
 
-                    // Step 3: Expand LR
-                    setStatus("Expanding LR…");
-                    $.get("/index/ExpandLivingRoom/", {}, function (r) {
+                    // Step 3: Snap Rooms
+                    setStatus("Snapping…");
+                    $.get("/index/SnapRooms/", {}, function (r) {
                         render(r);
 
-                        // Step 4: Snap Rooms
-                        setStatus("Snapping…");
-                        $.get("/index/SnapRooms/", {}, function (r) {
+                        // Step 4: Expand LR
+                        setStatus("Expanding LR…");
+                        $.get("/index/ExpandLivingRoom/", {}, function (r) {
                             render(r);
 
-                            // Step 5: Fill Gaps
-                            setStatus("Filling Gaps…");
-                            $.get("/index/FillWallGaps/", {}, function (r) {
+                            // Step 5: Snap Rooms (second pass)
+                            setStatus("Snapping…");
+                            $.get("/index/SnapRooms/", {}, function (r) {
                                 render(r);
 
-                                // Step 6: Fill LR
-                                setStatus("Filling LR…");
-                                $.get("/index/FillLivingRoom/", {}, function (r) {
+                                // Step 6: Align Walls
+                                setStatus("Aligning Walls…");
+                                $.get("/index/AlignWalls/", {}, function (r) {
                                     render(r);
-                                    var dxfBtn = document.getElementById("exportDXFButton");
-                                    if (dxfBtn) { dxfBtn.style.display = "block"; }
-                                    resetBtn();
-                                }).fail(onFail("Fill LR"));
-                            }).fail(onFail("Fill Gaps"));
-                        }).fail(onFail("Snap Rooms"));
-                    }).fail(onFail("Expand LR"));
+
+                                    // Step 7: Fill Gaps
+                                    setStatus("Filling Gaps…");
+                                    $.get("/index/FillWallGaps/", {}, function (r) {
+                                        render(r);
+
+                                        // Step 8: Fill LR
+                                        setStatus("Filling LR…");
+                                        $.get("/index/FillLivingRoom/", {}, function (r) {
+                                            render(r);
+
+                                            // Step 9: Fix Rooms
+                                            setStatus("Fixing Rooms…");
+                                            $.get("/index/FixRooms/", {}, function (r) {
+                                                render(r);
+                                                var dxfBtn = document.getElementById("exportDXFButton");
+                                                if (dxfBtn) { dxfBtn.style.display = "block"; }
+                                                resetBtn();
+                                            }).fail(onFail("Fix Rooms"));
+                                        }).fail(onFail("Fill LR"));
+                                    }).fail(onFail("Fill Gaps"));
+                                }).fail(onFail("Align Walls"));
+                            }).fail(onFail("Snap Rooms (2nd)"));
+                        }).fail(onFail("Expand LR"));
+                    }).fail(onFail("Snap Rooms"));
                 }).fail(onFail("Optimize"));
             }).fail(onFail("Generate"));
         };

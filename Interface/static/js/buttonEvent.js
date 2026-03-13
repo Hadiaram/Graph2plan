@@ -1274,9 +1274,28 @@ function CreateLeftGraph(rooms, roomID) {
                 d3.select('body').select('#LeftGraphSVG').selectAll('circle').attr("r", 0);
                 var dxfBtn = document.getElementById("exportDXFButton");
                 if (dxfBtn) { dxfBtn.style.display = "block"; }
-
+                var optimizeBtn = document.getElementById("OptimizeLayout");
+                if (optimizeBtn) { optimizeBtn.style.display = "block"; }
+                var expandLRBtn = document.getElementById("expandLivingRoom");
+                if (expandLRBtn) { expandLRBtn.style.display = "block"; }
+                var snapBtn = document.getElementById("snapRoomsButton");
+                if (snapBtn) { snapBtn.style.display = "block"; }
+                var alignWallsBtn = document.getElementById("alignWallsButton");
+                if (alignWallsBtn) { alignWallsBtn.style.display = "block"; }
+                var fillGapsBtn = document.getElementById("fillWallGapsButton");
+                if (fillGapsBtn) { fillGapsBtn.style.display = "block"; }
+                var fillLRBtn = document.getElementById("fillLivingRoomButton");
+                if (fillLRBtn) { fillLRBtn.style.display = "block"; }
+                var showOutsideBtn = document.getElementById("showOutsideButton");
+                if (showOutsideBtn) { showOutsideBtn.style.display = "block"; }
+                var logBndBtn = document.getElementById("logBoundariesButton");
+                if (logBndBtn) { logBndBtn.style.display = "block"; }
+                var logGraphBtn = document.getElementById("logGraphButton");
+                if (logGraphBtn) { logGraphBtn.style.display = "block"; }
                 var measureBtn = document.getElementById("measureButton");
                 if (measureBtn) { measureBtn.style.display = "block"; }
+                var fixRoomsBtn = document.getElementById("fixRoomsButton");
+                if (fixRoomsBtn) { fixRoomsBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1305,6 +1324,297 @@ function CreateLeftGraph(rooms, roomID) {
                 console.error("=".repeat(80) + "\n");
                 alert("Error generating floor plan. Check browser console for details.");
             });
+        };
+
+        // Optimize button handler
+        document.getElementById("OptimizeLayout").onclick = function () {
+            var btn = document.getElementById("OptimizeLayout");
+            btn.textContent = "Optimizing…";
+            btn.style.backgroundColor = "#616161";
+            $.get("/index/OptimizeLayout/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Optimize";
+                btn.style.backgroundColor = "#00897b";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ OptimizeLayout FAILED:", xhr.responseText);
+                alert("Optimization failed. Check server console for details.");
+                btn.textContent = "Optimize";
+                btn.style.backgroundColor = "#00897b";
+            });
+        };
+
+        // Expand LR button handler
+        document.getElementById("expandLivingRoom").onclick = function () {
+            var btn = document.getElementById("expandLivingRoom");
+            btn.textContent = "Expanding…";
+            btn.style.backgroundColor = "#616161";
+            $.get("/index/ExpandLivingRoom/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Expand LR";
+                btn.style.backgroundColor = "#e65100";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ ExpandLivingRoom FAILED:", xhr.responseText);
+                alert("Expand LR failed. Check server console for details.");
+                btn.textContent = "Expand LR";
+                btn.style.backgroundColor = "#e65100";
+            });
+        };
+
+        // Snap Rooms button handler
+        document.getElementById("snapRoomsButton").onclick = function () {
+            var btn = document.getElementById("snapRoomsButton");
+            btn.textContent = "Snapping…";
+            btn.style.backgroundColor = "#616161";
+            $.get("/index/SnapRooms/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Snap Rooms";
+                btn.style.backgroundColor = "#6A1B9A";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ SnapRooms FAILED:", xhr.responseText);
+                alert("Snap Rooms failed. Check server console for details.");
+                btn.textContent = "Snap Rooms";
+                btn.style.backgroundColor = "#6A1B9A";
+            });
+        };
+
+        // Align Walls button handler
+        document.getElementById("alignWallsButton").onclick = function () {
+            var btn = document.getElementById("alignWallsButton");
+            btn.textContent = "Aligning…";
+            btn.style.backgroundColor = "#616161";
+            $.get("/index/AlignWalls/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Align Walls";
+                btn.style.backgroundColor = "#0277BD";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ AlignWalls FAILED:", xhr.responseText);
+                alert("Align Walls failed. Check server console for details.");
+                btn.textContent = "Align Walls";
+                btn.style.backgroundColor = "#0277BD";
+            });
+        };
+
+        // Fill Gaps button handler
+        document.getElementById("fillWallGapsButton").onclick = function () {
+            var btn = document.getElementById("fillWallGapsButton");
+            btn.textContent = "Filling…";
+            btn.style.backgroundColor = "#616161";
+            $.get("/index/FillWallGaps/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Fill Gaps";
+                btn.style.backgroundColor = "#388E3C";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ FillWallGaps FAILED:", xhr.responseText);
+                alert("Fill Gaps failed. Check server console for details.");
+                btn.textContent = "Fill Gaps";
+                btn.style.backgroundColor = "#388E3C";
+            });
+        };
+
+        // Fill LR button handler
+        document.getElementById("fillLivingRoomButton").onclick = function () {
+            var btn = document.getElementById("fillLivingRoomButton");
+            btn.textContent = "Filling…";
+            btn.style.backgroundColor = "#616161";
+            $.get("/index/FillLivingRoom/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Fill LR";
+                btn.style.backgroundColor = "#BF360C";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ FillLivingRoom FAILED:", xhr.responseText);
+                alert("Fill LR failed. Check server console for details.");
+                btn.textContent = "Fill LR";
+                btn.style.backgroundColor = "#BF360C";
+            });
+        };
+
+        // Show Outside toggle handler
+        document.getElementById("showOutsideButton").onclick = function () {
+            var btn = this;
+            var svg = d3.select("#LeftLayoutSVG");
+            var revealed = btn.getAttribute("data-revealed") === "true";
+            if (!revealed) {
+                btn.setAttribute("data-revealed", "true");
+                btn.innerHTML = "👁 Hide Outside";
+                btn.style.backgroundColor = "#c62828";
+                var clipPoly = document.querySelector("#LeftLayoutSVG clipPath polygon");
+                var bndXMin = 0, bndXMax = 9999, bndYMin = 0, bndYMax = 9999;
+                if (clipPoly) {
+                    var pts = clipPoly.getAttribute("points").trim().split(/[\s,]+/);
+                    var xs = [], ys = [];
+                    for (var k = 0; k + 1 < pts.length; k += 2) {
+                        xs.push(parseFloat(pts[k]));
+                        ys.push(parseFloat(pts[k + 1]));
+                    }
+                    if (xs.length) {
+                        bndXMin = Math.min.apply(null, xs); bndXMax = Math.max.apply(null, xs);
+                        bndYMin = Math.min.apply(null, ys); bndYMax = Math.max.apply(null, ys);
+                    }
+                }
+                svg.selectAll("rect").each(function () {
+                    var r = d3.select(this);
+                    var cp = r.attr("clip-path");
+                    if (cp) {
+                        r.attr("data-orig-clip", cp).attr("clip-path", null);
+                        var rx = parseFloat(r.attr("x")), ry = parseFloat(r.attr("y"));
+                        var rw = parseFloat(r.attr("width")), rh = parseFloat(r.attr("height"));
+                        var outside = rx < bndXMin - 0.5 || rx + rw > bndXMax + 0.5 ||
+                                      ry < bndYMin - 0.5 || ry + rh > bndYMax + 0.5;
+                        if (outside) {
+                            svg.append("rect").attr("class", "outsideOverlay")
+                                .attr("x", rx).attr("y", ry).attr("width", rw).attr("height", rh)
+                                .attr("fill", "rgba(211,47,47,0.08)").attr("stroke", "#d32f2f")
+                                .attr("stroke-width", 2).attr("stroke-dasharray", "6,3")
+                                .attr("pointer-events", "none");
+                        }
+                    }
+                });
+            } else {
+                btn.setAttribute("data-revealed", "false");
+                btn.innerHTML = "👁 Show Outside";
+                btn.style.backgroundColor = "#6A1B9A";
+                svg.selectAll("rect").each(function () {
+                    var r = d3.select(this);
+                    var orig = r.attr("data-orig-clip");
+                    if (orig) { r.attr("clip-path", orig).attr("data-orig-clip", null); }
+                });
+                svg.selectAll(".outsideOverlay").remove();
+            }
+        };
+
+        // Log Boundary button handler
+        document.getElementById("logBoundariesButton").onclick = function () {
+            var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
+            var hsname;
+            if (arr = document.cookie.match(reg)) hsname = arr[2];
+            if (!hsname) { alert("Please load a boundary file first!"); return; }
+            var userRoomID = hsname.split(".")[0];
+            var logBtn = document.getElementById("logBoundariesButton");
+            var originalText = logBtn.innerHTML;
+            logBtn.innerHTML = "⏳ Loading...";
+            logBtn.style.backgroundColor = "#757575";
+            logBtn.style.cursor = "wait";
+            $.get("/index/Log_Boundaries/", { 'userRoomID': userRoomID }, function (data) {
+                logBtn.innerHTML = originalText;
+                logBtn.style.backgroundColor = "#00897B";
+                logBtn.style.cursor = "pointer";
+                if (data.success) {
+                    console.log("[Log Boundary] ============================================================");
+                    console.log("[Log Boundary] Floor plan:", data.floor_plan_id);
+                    console.log("[Log Boundary] Boundary extents:", data.boundary_extents);
+                    console.log("[Log Boundary] Boundary points (" + data.boundary_point_count + "):");
+                    data.boundary_points.forEach(function(pt) {
+                        var line = "  pt[" + pt.index + "]  x=" + pt.x + "  y=" + pt.y;
+                        if (pt.direction) line += "  dir=" + pt.direction;
+                        if (pt.is_new !== undefined) line += "  isNew=" + pt.is_new;
+                        console.log("[Log Boundary]" + line);
+                    });
+                    console.log("[Log Boundary] Wall segments (" + data.wall_segments.length + "):");
+                    data.wall_segments.forEach(function(w) {
+                        var line = "  wall[" + w.index + "]  (" + w.x1 + "," + w.y1 + ") → (" + w.x2 + "," + w.y2 + ")  len=" + w.length;
+                        if (w.direction) line += "  dir=" + w.direction;
+                        console.log("[Log Boundary]" + line);
+                    });
+                    console.log("[Log Boundary] Rooms (" + data.room_count + "):");
+                    data.rooms.forEach(function(r) {
+                        var line = "  [" + r.index + "] " + r.type_name +
+                                   "  (" + r.x1 + "," + r.y1 + ")-(" + r.x2 + "," + r.y2 + ")" +
+                                   "  closest_wall=" + r.closest_wall_name +
+                                   "  wall_dist=" + r.closest_wall_dist;
+                        if (r.escape_area_px2 !== undefined) line += "  escape=" + r.escape_area_px2 + "px²";
+                        if (!r.inside_boundary_extents) line += "  ⚠ OUTSIDE extents";
+                        console.log("[Log Boundary]" + line);
+                    });
+                    console.log("[Log Boundary] ============================================================");
+                    var outsideCount = data.rooms.filter(function(r) { return !r.inside_boundary_extents; }).length;
+                    var escapeCount  = data.rooms.filter(function(r) { return r.escape_area_px2 !== undefined && r.escape_area_px2 > 0.01; }).length;
+                    alert("✅ Boundary Log Complete — see browser console\n\n" +
+                        "Floor plan: " + data.floor_plan_id + "\n" +
+                        "Boundary points: " + data.boundary_point_count + "\n" +
+                        "Extents: x=[" + data.boundary_extents.x_min + ", " + data.boundary_extents.x_max + "]" +
+                        "  y=[" + data.boundary_extents.y_min + ", " + data.boundary_extents.y_max + "]\n" +
+                        "Rooms: " + data.room_count +
+                        (outsideCount > 0 ? "\n⚠ " + outsideCount + " room(s) outside boundary extents" : "") +
+                        (escapeCount  > 0 ? "\n⚠ " + escapeCount  + " room(s) partially outside boundary polygon" : ""));
+                } else {
+                    console.error("[Log Boundary] Failed:", data.error);
+                    alert("❌ Log Boundary failed:\n" + data.error);
+                }
+            }).fail(function(xhr, status, error) {
+                logBtn.innerHTML = originalText;
+                logBtn.style.backgroundColor = "#00897B";
+                logBtn.style.cursor = "pointer";
+                alert("❌ Log Boundary request failed:\n" + error);
+            });
+        };
+
+        // Log Graph button handler
+        document.getElementById("logGraphButton").onclick = function () {
+            var btn = document.getElementById("logGraphButton");
+            btn.innerHTML = "Loading...";
+            btn.style.backgroundColor = "#757575";
+            $.get("/index/Log_Graph/", {}, function (data) {
+                btn.innerHTML = "Log Graph";
+                btn.style.backgroundColor = "#F57F17";
+                if (!data.success) { alert("❌ Log Graph failed:\n" + data.error); return; }
+                console.log("=== GRAPH LOG ===");
+                console.log("Rooms (" + data.room_count + "):");
+                data.rooms.forEach(function (r) { console.log("  [" + r.index + "] type=" + r.type + "  " + r.name); });
+                console.log("Edges (" + data.edge_count + "):");
+                data.edges.forEach(function (e) {
+                    console.log("  [" + e.u + "] " + e.u_name + "  <-->  [" + e.v + "] " + e.v_name + "  (edge_type=" + e.edge_type + ")");
+                });
+                if (data.boxes && data.boxes.length) {
+                    console.log("Boxes:");
+                    data.boxes.forEach(function (b) {
+                        console.log("  [" + b.index + "] x0=" + b.x0 + " y0=" + b.y0 + " x1=" + b.x1 + " y1=" + b.y1);
+                    });
+                }
+                var roomLines = data.rooms.map(function (r) { return "  [" + r.index + "] " + r.name + " (type " + r.type + ")"; }).join("\n");
+                var edgeLines = data.edges.map(function (e) { return "  [" + e.u + "] " + e.u_name + " <-> [" + e.v + "] " + e.v_name; }).join("\n");
+                alert("=== GRAPH ===\n\nROOMS (" + data.room_count + "):\n" + roomLines +
+                      "\n\nEDGES (" + data.edge_count + "):\n" + edgeLines +
+                      "\n\n(Full box coords in browser console)");
+            }).fail(function (xhr, status, error) {
+                btn.innerHTML = "Log Graph";
+                btn.style.backgroundColor = "#F57F17";
+                alert("❌ Log Graph request failed:\n" + error);
+            });
+        };
+
+        // Fix Rooms button handler
+        document.getElementById("fixRoomsButton").onclick = function () {
+            var btn = document.getElementById("fixRoomsButton");
+            btn.textContent = "Fixing...";
+            btn.style.backgroundColor = "#880E4F";
+            $.get("/index/FixRooms/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Fix Rooms";
+                btn.style.backgroundColor = "#AD1457";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ FixRooms FAILED:", xhr.responseText);
+                alert("Fix Rooms failed. Check server console for details.");
+                btn.textContent = "Fix Rooms";
+                btn.style.backgroundColor = "#AD1457";
+            });
+        };
+
+        // Measure button toggle handler
+        document.getElementById("measureButton").onclick = function () {
+            measureMode = !measureMode;
+            measurePoint1 = null;
+            var btn = document.getElementById("measureButton");
+            var svgEl = document.getElementById('LeftGraphSVG');
+            if (measureMode) {
+                btn.style.backgroundColor = "#E65100";
+                btn.textContent = "📏 Measuring…";
+                svgEl.style.cursor = "crosshair";
+            } else {
+                btn.style.backgroundColor = "#795548";
+                btn.textContent = "📏 Measure";
+                svgEl.style.cursor = "";
+                d3.select("#LeftLayoutSVG").selectAll(".measureOverlay").remove();
+            }
         };
 
         // Run All — runs the full pipeline: Generate → Optimize → Expand LR →
@@ -1384,6 +1694,52 @@ function CreateLeftGraph(rooms, roomID) {
                     }).fail(onFail("Expand LR"));
                 }).fail(onFail("Optimize"));
             }).fail(onFail("Generate"));
+        };
+
+        // Export DXF button handler — triggers a browser file download
+        document.getElementById("exportDXFButton").onclick = function () {
+            var dxfBtn = document.getElementById("exportDXFButton");
+            var originalText = dxfBtn.innerHTML;
+            dxfBtn.innerHTML = "⏳ Exporting...";
+            dxfBtn.style.backgroundColor = "#757575";
+            dxfBtn.style.cursor = "wait";
+
+            // Use fetch so we can detect errors vs. a file response
+            fetch("/index/Export_DXF/")
+                .then(function (resp) {
+                    if (!resp.ok) {
+                        // Server returned an error — parse JSON error message
+                        return resp.json().then(function (data) {
+                            throw new Error(data.error || ("HTTP " + resp.status));
+                        });
+                    }
+                    var disposition = resp.headers.get("Content-Disposition") || "";
+                    var match = disposition.match(/filename="?([^"]+)"?/);
+                    var filename = match ? match[1] : "floorplan.dxf";
+                    return resp.blob().then(function (blob) {
+                        return { blob: blob, filename: filename };
+                    });
+                })
+                .then(function (result) {
+                    // Trigger browser download
+                    var url = URL.createObjectURL(result.blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = result.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    dxfBtn.innerHTML = originalText;
+                    dxfBtn.style.backgroundColor = "#2196F3";
+                    dxfBtn.style.cursor = "pointer";
+                })
+                .catch(function (err) {
+                    dxfBtn.innerHTML = originalText;
+                    dxfBtn.style.backgroundColor = "#2196F3";
+                    dxfBtn.style.cursor = "pointer";
+                    alert("❌ DXF Export failed:\n" + err.message);
+                });
         };
 
         // Auto-Adjust button handler
@@ -2004,5 +2360,16 @@ function rect_dblclick() {
 function rect_click() {
     console.log("rect_click");
     focus_rect = "click";
-
 }
+
+// Toggle graph visibility
+$(document).ready(function () {
+    document.getElementById("toggleGraphButton").onclick = function () {
+        var svg = document.getElementById("LeftGraphSVG");
+        var btn = document.getElementById("toggleGraphButton");
+        var hidden = svg.style.display === "none";
+        svg.style.display = hidden ? "block" : "none";
+        btn.textContent = hidden ? "Hide Graph" : "Show Graph";
+        btn.style.backgroundColor = hidden ? "#546E7A" : "#37474F";
+    };
+});

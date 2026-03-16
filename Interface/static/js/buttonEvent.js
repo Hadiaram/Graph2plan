@@ -1296,6 +1296,8 @@ function CreateLeftGraph(rooms, roomID) {
                 if (measureBtn) { measureBtn.style.display = "block"; }
                 var fixRoomsBtn = document.getElementById("fixRoomsButton");
                 if (fixRoomsBtn) { fixRoomsBtn.style.display = "block"; }
+                var adjustBndBtn = document.getElementById("adjustBoundaryButton");
+                if (adjustBndBtn) { adjustBndBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1596,6 +1598,23 @@ function CreateLeftGraph(rooms, roomID) {
                 alert("Fix Rooms failed. Check server console for details.");
                 btn.textContent = "Fix Rooms";
                 btn.style.backgroundColor = "#AD1457";
+            });
+        };
+
+        // Adjust Boundary button handler
+        document.getElementById("adjustBoundaryButton").onclick = function () {
+            var btn = document.getElementById("adjustBoundaryButton");
+            btn.textContent = "Adjusting...";
+            btn.style.backgroundColor = "#311B92";
+            $.get("/index/AdjustBoundary/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Adjust Boundary";
+                btn.style.backgroundColor = "#4527A0";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ AdjustBoundary FAILED:", xhr.responseText);
+                alert("Adjust Boundary failed. Check server console for details.");
+                btn.textContent = "Adjust Boundary";
+                btn.style.backgroundColor = "#4527A0";
             });
         };
 

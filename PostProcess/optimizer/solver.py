@@ -1165,6 +1165,112 @@ def align_walls(boxes, types, tol=6.0):
     return [np.array(b) for b in boxes]
 
 
+def adjust_boundary_to_rooms(boxes, types, boundary):
+    """
+    After post-processing heuristics, some non-LR rooms may extend beyond the
+    original boundary polygon.  This function shifts each wall of the boundary
+    outward (never inward) to encompass any such rooms.
+
+    LivingRoom (type 0) is excluded — its bounding box intentionally extends
+    past the house boundary and must not drive expansion.
+
+    Unlike a simple bounding-box check, this uses the actual boundary polygon
+    geometry (_poly_x_range_at_y / _poly_y_range_at_x) to detect which wall
+    each room is outside of.  This correctly handles L-shaped and other
+    non-rectangular boundaries: a room in the notch corner of an L-shape is
+    detected as outside even though it sits within the overall bounding box.
+
+    For each non-LR room, the midpoint of each side is scanned against the
+    polygon to find the actual wall position at that level.  If the room
+    extends past that wall, the wall's required new position is recorded.
+    All boundary vertices sharing that wall coordinate (within EPS tolerance)
+    are then shifted to the new position.
+
+    Parameters
+    ----------
+    boxes    : array-like (K, 4)  [x0, y0, x1, y1]
+    types    : array-like (K,)    room type indices
+    boundary : array-like (N, 4)  [x, y, dir, isNew]
+
+    Returns
+    -------
+    new_boundary : np.ndarray  (N, 4)
+    """
+    LR_TYPE = 0
+    boxes = np.array(boxes, dtype=float)
+    types = np.array(types, dtype=int).flatten()
+    bnd   = np.array(boundary, dtype=float)
+
+    poly_verts = bnd[:, :2].tolist()
+    if poly_verts[0] != poly_verts[-1]:
+        poly_verts.append(poly_verts[0])
+
+    solid_mask = types != LR_TYPE
+    if not np.any(solid_mask):
+        print("[ADJUST BOUNDARY] No non-LR rooms found — boundary unchanged.")
+        return bnd
+
+    EPS = 0.5
+
+    # x_expansions: old_x_wall → required_new_x  (vertical walls)
+    # y_expansions: old_y_wall → required_new_y  (horizontal walls)
+    x_expansions = {}
+    y_expansions = {}
+
+    for i in np.where(solid_mask)[0]:
+        rx0, ry0, rx1, ry1 = (float(boxes[i][k]) for k in range(4))
+        cy = (ry0 + ry1) / 2.0
+        cx = (rx0 + rx1) / 2.0
+
+        # --- LEFT / RIGHT: scan the polygon at the room's y-midpoint ---
+        xr = _poly_x_range_at_y(poly_verts, cy)
+        if xr:
+            left_wall, right_wall = xr
+            if rx0 < left_wall - EPS:
+                print(f"[ADJUST BOUNDARY] Room {i}: LEFT extends to {rx0:.1f}, wall at {left_wall:.1f}")
+                if left_wall not in x_expansions or rx0 < x_expansions[left_wall]:
+                    x_expansions[left_wall] = rx0
+            if rx1 > right_wall + EPS:
+                print(f"[ADJUST BOUNDARY] Room {i}: RIGHT extends to {rx1:.1f}, wall at {right_wall:.1f}")
+                if right_wall not in x_expansions or rx1 > x_expansions[right_wall]:
+                    x_expansions[right_wall] = rx1
+
+        # --- TOP / BOTTOM: scan the polygon at the room's x-midpoint ---
+        yr = _poly_y_range_at_x(poly_verts, cx)
+        if yr:
+            top_wall, bot_wall = yr
+            if ry0 < top_wall - EPS:
+                print(f"[ADJUST BOUNDARY] Room {i}: TOP extends to {ry0:.1f}, wall at {top_wall:.1f}")
+                if top_wall not in y_expansions or ry0 < y_expansions[top_wall]:
+                    y_expansions[top_wall] = ry0
+            if ry1 > bot_wall + EPS:
+                print(f"[ADJUST BOUNDARY] Room {i}: BOTTOM extends to {ry1:.1f}, wall at {bot_wall:.1f}")
+                if bot_wall not in y_expansions or ry1 > y_expansions[bot_wall]:
+                    y_expansions[bot_wall] = ry1
+
+    if not x_expansions and not y_expansions:
+        print("[ADJUST BOUNDARY] All rooms are inside the boundary — no adjustment needed.")
+        return bnd
+
+    # Apply expansions: shift every boundary vertex that sits on an old wall
+    # coordinate to the new required position.
+    new_bnd = bnd.copy()
+    for idx in range(len(bnd)):
+        vx, vy = float(bnd[idx, 0]), float(bnd[idx, 1])
+        for old_x, new_x in x_expansions.items():
+            if abs(vx - old_x) < EPS:
+                new_bnd[idx, 0] = new_x
+                break
+        for old_y, new_y in y_expansions.items():
+            if abs(vy - old_y) < EPS:
+                new_bnd[idx, 1] = new_y
+                break
+
+    print(f"[ADJUST BOUNDARY] Applied {len(x_expansions)} x-wall and "
+          f"{len(y_expansions)} y-wall expansions.")
+    return new_bnd
+
+
 def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0, room_gap_threshold=5.0):
     """Expand rooms to fill small gaps between their edges and the exterior boundary wall.
 

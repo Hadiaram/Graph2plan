@@ -31,7 +31,25 @@ _RIGHT_ABOVE = 8
 _RIGHT_BELOW = 9
 
 CANVAS       = 256
-MIN_ROOM_PX  = 10   # ~0.7 m — small floor to allow solver flexibility
+MIN_ROOM_PX  = 10   # fallback minimum when type is unknown
+
+# Per-type minimum (width, height) in pixels enforced by the CP-SAT optimizer.
+# Keeps rooms from being crushed to slivers while still giving the solver room
+# to adjust sizes.  Structural/open types use the global fallback.
+_MIN_WH = {
+    0:  (50, 40),   # LivingRoom
+    1:  (40, 35),   # MasterRoom
+    2:  (30, 25),   # Kitchen
+    3:  (20, 20),   # Bathroom
+    4:  (25, 25),   # DiningRoom
+    5:  (35, 30),   # ChildRoom
+    6:  (30, 25),   # StudyRoom
+    7:  (35, 30),   # SecondRoom
+    8:  (35, 30),   # GuestRoom
+    9:  (20, 20),   # Balcony
+    10: (20, 20),   # Entrance
+    11: (15, 15),   # Storage
+}
 
 
 def _poly_x_range_at_y(vertices, y):
@@ -86,7 +104,7 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     status          : str  'OPTIMAL' | 'FEASIBLE' | 'FAILED'
     """
     try:
-        from ortools.sat.python import cp_model
+        from ortools.sat.python import cp_model #type: ignore
     except ImportError:
         warnings.warn(
             "ortools not installed. Run: pip install ortools\n"
@@ -119,19 +137,24 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     W = bx1 - bx0
     H = by1 - by0
 
+    # Per-room minimum dimensions from type table
+    types_arr = np.array(types).flatten().astype(int) if types is not None else np.zeros(K, dtype=int)
+    min_w = [_MIN_WH.get(int(types_arr[i]), (MIN_ROOM_PX, MIN_ROOM_PX))[0] for i in range(K)]
+    min_h = [_MIN_WH.get(int(types_arr[i]), (MIN_ROOM_PX, MIN_ROOM_PX))[1] for i in range(K)]
+
     # --- Initial positions (clamped to valid range) --------------------------
-    x0 = [int(np.clip(boxes[i, 0], bx0, bx1 - MIN_ROOM_PX)) for i in range(K)]
-    y0 = [int(np.clip(boxes[i, 1], by0, by1 - MIN_ROOM_PX)) for i in range(K)]
-    w0 = [int(np.clip(boxes[i, 2] - boxes[i, 0], MIN_ROOM_PX, W)) for i in range(K)]
-    h0 = [int(np.clip(boxes[i, 3] - boxes[i, 1], MIN_ROOM_PX, H)) for i in range(K)]
+    x0 = [int(np.clip(boxes[i, 0], bx0, bx1 - min_w[i])) for i in range(K)]
+    y0 = [int(np.clip(boxes[i, 1], by0, by1 - min_h[i])) for i in range(K)]
+    w0 = [int(np.clip(boxes[i, 2] - boxes[i, 0], min_w[i], W)) for i in range(K)]
+    h0 = [int(np.clip(boxes[i, 3] - boxes[i, 1], min_h[i], H)) for i in range(K)]
 
     # --- CP-SAT model --------------------------------------------------------
     model = cp_model.CpModel()
 
-    x = [model.NewIntVar(bx0, bx1 - MIN_ROOM_PX, f'x_{i}') for i in range(K)]
-    y = [model.NewIntVar(by0, by1 - MIN_ROOM_PX, f'y_{i}') for i in range(K)]
-    w = [model.NewIntVar(MIN_ROOM_PX, W,           f'w_{i}') for i in range(K)]
-    h = [model.NewIntVar(MIN_ROOM_PX, H,           f'h_{i}') for i in range(K)]
+    x = [model.NewIntVar(bx0, bx1 - min_w[i], f'x_{i}') for i in range(K)]
+    y = [model.NewIntVar(by0, by1 - min_h[i], f'y_{i}') for i in range(K)]
+    w = [model.NewIntVar(min_w[i], W,          f'w_{i}') for i in range(K)]
+    h = [model.NewIntVar(min_h[i], H,          f'h_{i}') for i in range(K)]
 
     # Derived end-coordinate variables (needed by NewIntervalVar)
     xe = [model.NewIntVar(bx0, bx1, f'xe_{i}') for i in range(K)]
@@ -448,7 +471,7 @@ def optimize_layout(boxes, types, edges, boundary=None, timeout=5.0):
     return result, 'FAILED'
 
 
-def expand_living_room(boxes, types, boundary):
+def expand_living_room(boxes, types, boundary, edges=None):
     """
     Expand the LivingRoom (type 0) to fill empty space in all four directions.
 
@@ -501,6 +524,45 @@ def expand_living_room(boxes, types, boundary):
     wall_attached_all    = wall_left_attached | wall_right_attached | wall_top_attached | wall_bottom_attached
     print(f"  [EXPAND] Wall-attached rooms: {sorted(wall_attached_all)}")
 
+    # Build a set of edge-connected room pairs for quick lookup
+    edge_pairs = set()
+    if edges is not None:
+        for e in edges:
+            u, v = int(e[0]), int(e[1])
+            if u != v:
+                edge_pairs.add((min(u, v), max(u, v)))
+
+    def _rigid_offsets(push_chain, axis):
+        """For rooms in push_chain that share a graph edge AND significantly
+        overlap, return {child_idx: (parent_idx, offset)} where offset is
+        child_pos - parent_pos in the given axis (0=x, 1=y).
+        Parent is always the larger-area room."""
+        offsets = {}
+        chain_list = list(push_chain)
+        for ci in range(len(chain_list)):
+            for cj in range(ci + 1, len(chain_list)):
+                u, v = chain_list[ci], chain_list[cj]
+                if (min(u, v), max(u, v)) not in edge_pairs:
+                    continue
+                ux0, uy0, ux1, uy1 = boxes[u]
+                vx0, vy0, vx1, vy1 = boxes[v]
+                ox = max(0.0, min(ux1, vx1) - max(ux0, vx0))
+                oy = max(0.0, min(uy1, vy1) - max(uy0, vy0))
+                overlap = ox * oy
+                min_area = min((ux1 - ux0) * (uy1 - uy0),
+                               (vx1 - vx0) * (vy1 - vy0))
+                if min_area <= 0 or overlap / min_area < 0.5:
+                    continue
+                # Parent = larger room, child = smaller room
+                u_area = (ux1 - ux0) * (uy1 - uy0)
+                v_area = (vx1 - vx0) * (vy1 - vy0)
+                parent, child = (u, v) if u_area >= v_area else (v, u)
+                offset = float(boxes[child][axis]) - float(boxes[parent][axis])
+                offsets[child] = (parent, offset)
+                print(f"  [EXPAND]   rigid pair: room {parent} (parent) + "
+                      f"room {child} (child), axis={axis}, offset={offset:.1f}")
+        return offsets
+
     moved_rooms = set()   # rooms fixed after being pushed in a previous pass
     MAX_PASSES = 20
     for pass_num in range(1, MAX_PASSES + 1):
@@ -539,8 +601,14 @@ def expand_living_room(boxes, types, boundary):
                     srt = sorted(push_chain, key=lambda i: boxes[i][0])
                     ws = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
                     orig_lo = {i: float(boxes[i][0]) for i in srt}
+                    rigid = _rigid_offsets(push_chain, axis=0)
                     placed = {}
                     for i in srt:
+                        if i in rigid:
+                            parent, offset = rigid[i]
+                            if parent in placed:
+                                placed[i] = placed[parent] + offset
+                                continue
                         pos = bx0
                         for j in placed:
                             if min(float(boxes[i][3]), float(boxes[j][3])) - max(float(boxes[i][1]), float(boxes[j][1])) > 0:
@@ -588,8 +656,16 @@ def expand_living_room(boxes, types, boundary):
                     srt = sorted(push_chain, key=lambda i: -boxes[i][2])
                     ws = {i: float(boxes[i][2] - boxes[i][0]) for i in srt}
                     orig_lo = {i: float(boxes[i][0]) for i in srt}
+                    # For RIGHT, placed stores x1; rigid offset on x1
+                    rigid = {c: (p, float(boxes[c][2]) - float(boxes[p][2]))
+                             for c, (p, _) in _rigid_offsets(push_chain, axis=0).items()}
                     placed = {}
                     for i in srt:
+                        if i in rigid:
+                            parent, offset = rigid[i]
+                            if parent in placed:
+                                placed[i] = placed[parent] + offset
+                                continue
                         pos = bx1
                         for j in placed:
                             if min(float(boxes[i][3]), float(boxes[j][3])) - max(float(boxes[i][1]), float(boxes[j][1])) > 0:
@@ -637,8 +713,14 @@ def expand_living_room(boxes, types, boundary):
                     srt = sorted(push_chain, key=lambda i: boxes[i][1])
                     hs = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
                     orig_lo = {i: float(boxes[i][1]) for i in srt}
+                    rigid = _rigid_offsets(push_chain, axis=1)
                     placed = {}
                     for i in srt:
+                        if i in rigid:
+                            parent, offset = rigid[i]
+                            if parent in placed:
+                                placed[i] = placed[parent] + offset
+                                continue
                         pos = by0
                         for j in placed:
                             if min(float(boxes[i][2]), float(boxes[j][2])) - max(float(boxes[i][0]), float(boxes[j][0])) > 0:
@@ -686,8 +768,16 @@ def expand_living_room(boxes, types, boundary):
                     srt = sorted(push_chain, key=lambda i: -boxes[i][3])
                     hs = {i: float(boxes[i][3] - boxes[i][1]) for i in srt}
                     orig_lo = {i: float(boxes[i][1]) for i in srt}
+                    # For BOTTOM, placed stores y1; rigid offset on y1
+                    rigid = {c: (p, float(boxes[c][3]) - float(boxes[p][3]))
+                             for c, (p, _) in _rigid_offsets(push_chain, axis=1).items()}
                     placed = {}
                     for i in srt:
+                        if i in rigid:
+                            parent, offset = rigid[i]
+                            if parent in placed:
+                                placed[i] = placed[parent] + offset
+                                continue
                         pos = by1
                         for j in placed:
                             if min(float(boxes[i][2]), float(boxes[j][2])) - max(float(boxes[i][0]), float(boxes[j][0])) > 0:
@@ -1009,7 +1099,73 @@ def boxes_to_boundaries(boxes):
     return boundaries
 
 
-def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
+def align_walls(boxes, types, tol=6.0):
+    """Snap wall coordinates that are within `tol` pixels of each other to a
+    common value, eliminating sub-pixel gaps that fill_wall_gaps would otherwise
+    try to close (and potentially overshoot, causing 1-pixel overlaps).
+
+    Only solid non-LR rooms are considered (types not in {0,12,13,14,15}).
+    For each axis (x and y) all left/right or top/bottom wall coordinates are
+    collected, clustered by proximity, and each cluster is snapped to its
+    integer median value.
+    """
+    EXCL = {0, 12, 13, 14, 15}
+    boxes = [list(b) for b in boxes]
+    K = len(boxes)
+
+    def _snap_axis(coords_by_room, dim):
+        """coords_by_room: list of (room_idx, coord_slot, value).
+           dim unused — kept for clarity."""
+        vals = sorted(set(v for _, _, v in coords_by_room))
+        if not vals:
+            return
+        # Build clusters: greedily merge values within tol of the previous
+        clusters = []
+        cur = [vals[0]]
+        for v in vals[1:]:
+            if v - cur[-1] <= tol:
+                cur.append(v)
+            else:
+                clusters.append(cur)
+                cur = [v]
+        clusters.append(cur)
+
+        # Map each original value to its cluster median (rounded to int)
+        snap_map = {}
+        for cl in clusters:
+            if len(cl) < 2:
+                continue                      # lone value — nothing to snap
+            target = int(round(sorted(cl)[len(cl) // 2]))
+            for v in cl:
+                snap_map[v] = target
+
+        for room_idx, slot, val in coords_by_room:
+            if val in snap_map:
+                boxes[room_idx][slot] = snap_map[val]
+
+    # Collect x-coords (slots 0 and 2) and y-coords (slots 1 and 3)
+    x_coords = []
+    y_coords = []
+    for i in range(K):
+        if int(types[i]) in EXCL:
+            continue
+        x_coords.append((i, 0, boxes[i][0]))
+        x_coords.append((i, 2, boxes[i][2]))
+        y_coords.append((i, 1, boxes[i][1]))
+        y_coords.append((i, 3, boxes[i][3]))
+
+    _snap_axis(x_coords, 'x')
+    _snap_axis(y_coords, 'y')
+
+    snapped = sum(
+        1 for i in range(K) if int(types[i]) not in EXCL
+        and any(boxes[i][s] != list(boxes[i])[s] for s in range(4))
+    )
+    print(f"[ALIGN WALLS] Done — tolerance={tol}px")
+    return [np.array(b) for b in boxes]
+
+
+def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0, room_gap_threshold=5.0):
     """Expand rooms to fill small gaps between their edges and the exterior boundary wall.
 
     For each room and each of its 4 sides, if the gap to the **actual** boundary wall
@@ -1082,9 +1238,10 @@ def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
             print(f"[FILL GAPS]   {name} LEFT:   gap={gap:.2f}px (wall={wall_left:.1f}) > threshold, skipping")
         else:
             blocker = find_blocker(i, lambda j: (
-                min(y1, boxes[j][3]) - max(y0, boxes[j][1]) > 0
-                and boxes[j][2] > wall_left
+                min(y1, boxes[j][3]) - max(y0, boxes[j][1]) > 1.0
+                and boxes[j][0] > wall_left + 0.5   # not already at the wall
                 and boxes[j][0] < x0
+                and boxes[j][2] > wall_left
             ))
             if blocker is not None:
                 print(f"[FILL GAPS]   {name} LEFT:   gap={gap:.2f}px (wall={wall_left:.1f}), blocked by {room_label(blocker)}")
@@ -1101,9 +1258,10 @@ def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
             print(f"[FILL GAPS]   {name} RIGHT:  gap={gap:.2f}px (wall={wall_right:.1f}) > threshold, skipping")
         else:
             blocker = find_blocker(i, lambda j: (
-                min(y1, boxes[j][3]) - max(y0, boxes[j][1]) > 0
-                and boxes[j][0] < wall_right
+                min(y1, boxes[j][3]) - max(y0, boxes[j][1]) > 1.0
+                and boxes[j][2] < wall_right - 0.5   # not already at the wall
                 and boxes[j][2] > x1
+                and boxes[j][0] < wall_right
             ))
             if blocker is not None:
                 print(f"[FILL GAPS]   {name} RIGHT:  gap={gap:.2f}px (wall={wall_right:.1f}), blocked by {room_label(blocker)}")
@@ -1120,9 +1278,10 @@ def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
             print(f"[FILL GAPS]   {name} TOP:    gap={gap:.2f}px (wall={wall_top:.1f}) > threshold, skipping")
         else:
             blocker = find_blocker(i, lambda j: (
-                min(x1, boxes[j][2]) - max(x0, boxes[j][0]) > 0
-                and boxes[j][3] > wall_top
+                min(x1, boxes[j][2]) - max(x0, boxes[j][0]) > 1.0
+                and boxes[j][1] > wall_top + 0.5   # not already at the wall
                 and boxes[j][1] < y0
+                and boxes[j][3] > wall_top
             ))
             if blocker is not None:
                 print(f"[FILL GAPS]   {name} TOP:    gap={gap:.2f}px (wall={wall_top:.1f}), blocked by {room_label(blocker)}")
@@ -1139,9 +1298,10 @@ def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
             print(f"[FILL GAPS]   {name} BOTTOM: gap={gap:.2f}px (wall={wall_bottom:.1f}) > threshold, skipping")
         else:
             blocker = find_blocker(i, lambda j: (
-                min(x1, boxes[j][2]) - max(x0, boxes[j][0]) > 0
-                and boxes[j][1] < wall_bottom
+                min(x1, boxes[j][2]) - max(x0, boxes[j][0]) > 1.0
+                and boxes[j][3] < wall_bottom - 0.5   # not already at the wall
                 and boxes[j][3] > y1
+                and boxes[j][1] < wall_bottom
             ))
             if blocker is not None:
                 print(f"[FILL GAPS]   {name} BOTTOM: gap={gap:.2f}px (wall={wall_bottom:.1f}), blocked by {room_label(blocker)}")
@@ -1149,6 +1309,83 @@ def fill_wall_gaps(boxes, types, boundary, gap_threshold=10.0):
                 print(f"[FILL GAPS]   {name} BOTTOM: gap={gap:.2f}px (wall={wall_bottom:.1f}) → expanding to wall")
                 boxes[i][3] = wall_bottom
                 y1 = wall_bottom
+
+    # Second pass: room-to-room gaps
+    # For each room and each direction, find the nearest neighbouring room
+    # (with perpendicular overlap) and close the gap if it is <= gap_threshold.
+    # LivingRoom and structural elements are excluded as both source and target.
+    EXCL = {0, 12, 13, 14, 15}
+    print(f"[FILL GAPS] Room-to-room pass (threshold={room_gap_threshold}px)...")
+
+    for i in range(K):
+        if int(types[i]) in EXCL:
+            continue
+        x0, y0, x1, y1 = boxes[i]
+        name = room_label(i)
+
+        # LEFT — find nearest room to the left with y-overlap
+        best_j, best_gap = None, room_gap_threshold + 1
+        for j in range(K):
+            if j == i or int(types[j]) in EXCL:
+                continue
+            jx0, jy0, jx1, jy1 = boxes[j]
+            if min(y1, jy1) - max(y0, jy0) > 0 and 0 < x0 - jx1 <= room_gap_threshold:
+                if x0 - jx1 < best_gap:
+                    best_gap, best_j = x0 - jx1, j
+        if best_j is not None:
+            jx0, jy0, jx1, jy1 = boxes[best_j]
+            print(f"[FILL GAPS]   {name} LEFT:   room-to-room gap={best_gap:.2f}px "
+                  f"to {room_label(best_j)} → snapping")
+            boxes[i][0] = jx1          # snap directly — no rounding overlap
+            x0 = boxes[i][0]
+
+        # RIGHT — find nearest room to the right with y-overlap
+        best_j, best_gap = None, room_gap_threshold + 1
+        for j in range(K):
+            if j == i or int(types[j]) in EXCL:
+                continue
+            jx0, jy0, jx1, jy1 = boxes[j]
+            if min(y1, jy1) - max(y0, jy0) > 0 and 0 < jx0 - x1 <= room_gap_threshold:
+                if jx0 - x1 < best_gap:
+                    best_gap, best_j = jx0 - x1, j
+        if best_j is not None:
+            jx0, jy0, jx1, jy1 = boxes[best_j]
+            print(f"[FILL GAPS]   {name} RIGHT:  room-to-room gap={best_gap:.2f}px "
+                  f"to {room_label(best_j)} → snapping")
+            boxes[i][2] = jx0
+            x1 = boxes[i][2]
+
+        # TOP — find nearest room above with x-overlap
+        best_j, best_gap = None, room_gap_threshold + 1
+        for j in range(K):
+            if j == i or int(types[j]) in EXCL:
+                continue
+            jx0, jy0, jx1, jy1 = boxes[j]
+            if min(x1, jx1) - max(x0, jx0) > 0 and 0 < y0 - jy1 <= room_gap_threshold:
+                if y0 - jy1 < best_gap:
+                    best_gap, best_j = y0 - jy1, j
+        if best_j is not None:
+            jx0, jy0, jx1, jy1 = boxes[best_j]
+            print(f"[FILL GAPS]   {name} TOP:    room-to-room gap={best_gap:.2f}px "
+                  f"to {room_label(best_j)} → snapping")
+            boxes[i][1] = jy1
+            y0 = boxes[i][1]
+
+        # BOTTOM — find nearest room below with x-overlap
+        best_j, best_gap = None, room_gap_threshold + 1
+        for j in range(K):
+            if j == i or int(types[j]) in EXCL:
+                continue
+            jx0, jy0, jx1, jy1 = boxes[j]
+            if min(x1, jx1) - max(x0, jx0) > 0 and 0 < jy0 - y1 <= room_gap_threshold:
+                if jy0 - y1 < best_gap:
+                    best_gap, best_j = jy0 - y1, j
+        if best_j is not None:
+            jx0, jy0, jx1, jy1 = boxes[best_j]
+            print(f"[FILL GAPS]   {name} BOTTOM: room-to-room gap={best_gap:.2f}px "
+                  f"to {room_label(best_j)} → snapping")
+            boxes[i][3] = jy0
+            y1 = boxes[i][3]
 
     print(f"[FILL GAPS] Done.")
     return [np.array(b) for b in boxes]

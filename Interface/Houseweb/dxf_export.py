@@ -28,8 +28,8 @@ except ImportError:
 # Try to import shapely for polygon clipping
 HAS_SHAPELY = False
 try:
-    from shapely.geometry import Polygon, MultiPolygon
-    from shapely.ops import unary_union
+    from shapely.geometry import Polygon, MultiPolygon #type: ignore
+    from shapely.ops import unary_union #type: ignore
     HAS_SHAPELY = True
 except ImportError:
     warnings.warn(
@@ -131,10 +131,12 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
         if rBoundary is not None and len(rBoundary) > 0:
             room_labels = _get_room_labels(fp_data)
 
-            # Clip each room to the exterior boundary only
+            # Clip each room to the exterior boundary and resolve inter-room overlaps
             boundary_array = _get_field(fp_data, 'boundary')
+            rType_array    = _get_field(fp_data, 'rType')
             if boundary_array is not None:
-                clipped_rBoundary = _clip_room_polygons(rBoundary, np.array(boundary_array), None)
+                clipped_rBoundary = _clip_room_polygons(
+                    rBoundary, np.array(boundary_array), None, types=rType_array)
             else:
                 clipped_rBoundary = list(rBoundary)
 
@@ -214,7 +216,8 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
                 # Clip boxes
                 boundary_array = _get_field(fp_data, 'boundary')
                 if boundary_array is not None:
-                    clipped_boxes = _clip_room_polygons(box_polygons, np.array(boundary_array), order)
+                    clipped_boxes = _clip_room_polygons(
+                        box_polygons, np.array(boundary_array), order, types=rType_data)
                 else:
                     clipped_boxes = box_polygons
 
@@ -313,8 +316,9 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
                     msp.add_line(door_p1, door_p2,
                                  dxfattribs={'layer': 'DOORS', 'lineweight': 35})
 
-                    door_radius = np.linalg.norm([door_p2[0] - door_p1[0],
-                                                  door_p2[1] - door_p1[1]])
+                    door_radius = min(30.0 * scale,
+                                      np.linalg.norm([door_p2[0] - door_p1[0],
+                                                       door_p2[1] - door_p1[1]]))
                     if door_radius > 0:
                         door_angle_deg = np.degrees(
                             np.arctan2(door_p2[1] - door_p1[1], door_p2[0] - door_p1[0]))
@@ -645,22 +649,28 @@ def _calculate_centroid(polygon):
     return (float(np.mean(x_coords)), float(np.mean(y_coords)))
 
 
-def _clip_room_polygons(rBoundary, boundary, order):
+def _clip_room_polygons(rBoundary, boundary, order, types=None):
     """
-    Clip room polygons to the exterior boundary only.
+    Clip room polygons to the exterior boundary and resolve inter-room overlaps.
 
-    For DXF export each room is drawn at its actual shape — CAD software
-    handles overlapping polylines correctly.  We only remove the parts of
-    each room that fall outside the exterior boundary polygon.
+    Rules:
+    - LivingRoom (type 0): drawn as boundary minus all other solid rooms, so it
+      shows only the open floor area.
+    - All other rooms: clipped to boundary, then small slivers from neighbouring
+      rooms are subtracted (overlap < 25 % of this room's area).  This removes
+      the double-line artifact when two rooms share a slightly-overlapping edge,
+      without making any room disappear.
+    - LivingRoom's polygon is never subtracted from other rooms (LR's bounding
+      box extends past the house boundary and would erase everything inside it).
 
     Args:
         rBoundary: List of room boundary polygons
-        boundary: Exterior boundary polygon
-        order: Rendering order (1-indexed) — kept for API compatibility
+        boundary:  Exterior boundary as (N,2+) numpy array
+        order:     Rendering order — kept for API compatibility
+        types:     Optional list/array of room type ints (same length as rBoundary)
 
     Returns:
-        List of clipped polygons (same length as rBoundary, None if a room
-        ends up completely outside the boundary)
+        List of clipped polygons (same length as rBoundary, None if outside boundary)
     """
     if not HAS_SHAPELY:
         print("[DXF] Warning: Shapely not available, skipping boundary clip")
@@ -668,40 +678,82 @@ def _clip_room_polygons(rBoundary, boundary, order):
 
     try:
         boundary_poly = Polygon(boundary[:, :2])
-        clipped_rooms = []
+        types_arr = None
+        if types is not None:
+            types_arr = np.array(types).flatten().astype(int)
 
+        # Build a valid Shapely polygon for every room, clipped to boundary.
+        clipped_polys = []
         for rb in rBoundary:
             if not isinstance(rb, np.ndarray) or len(rb) == 0:
-                clipped_rooms.append(None)
+                clipped_polys.append(None)
+                continue
+            try:
+                coords = rb[:, :2] if rb.ndim == 2 and rb.shape[1] >= 2 else rb
+                p = Polygon(coords)
+                if not p.is_valid:
+                    p = p.buffer(0)
+                cp = p.intersection(boundary_poly)
+                clipped_polys.append(cp if not cp.is_empty else None)
+            except Exception:
+                clipped_polys.append(None)
+
+        # Identify LivingRoom indices (type 0) and solid non-LR indices
+        lr_indices  = set()
+        sol_indices = set()   # solid, non-LR rooms used for LR subtraction
+        _OPEN = {0, 13, 14, 15}
+        for i in range(len(rBoundary)):
+            if types_arr is not None and i < len(types_arr):
+                t = int(types_arr[i])
+                if t == 0:
+                    lr_indices.add(i)
+                elif t not in _OPEN:
+                    sol_indices.add(i)
+            else:
+                sol_indices.add(i)
+
+        # Union of solid non-LR rooms clipped to boundary (used for LR rendering)
+        solid_clipped = [clipped_polys[j] for j in sol_indices if clipped_polys[j] is not None]
+        solid_union   = unary_union(solid_clipped) if solid_clipped else None
+
+        result = []
+        for i, rb in enumerate(rBoundary):
+            cp = clipped_polys[i]
+            if cp is None:
+                result.append(None)
                 continue
 
             try:
-                room_poly = Polygon(rb[:, :2] if rb.ndim == 2 and rb.shape[1] >= 2 else rb)
-
-                if not room_poly.is_valid or not boundary_poly.is_valid:
-                    # Keep original polygon if validity check fails
-                    clipped_rooms.append(rb)
-                    continue
-
-                clipped = room_poly.intersection(boundary_poly)
-
-                if clipped.is_empty:
-                    clipped_rooms.append(None)
-                elif isinstance(clipped, Polygon):
-                    clipped_rooms.append(np.array(list(clipped.exterior.coords)))
-                elif isinstance(clipped, MultiPolygon):
-                    largest = max(clipped.geoms, key=lambda p: p.area)
-                    clipped_rooms.append(np.array(list(largest.exterior.coords)))
+                if i in lr_indices:
+                    # LivingRoom = open floor area inside boundary
+                    final = boundary_poly.difference(solid_union) if solid_union else boundary_poly
                 else:
-                    # GeometryCollection or other — fall back to original
-                    clipped_rooms.append(rb)
+                    # Regular room: subtract all other solid non-LR rooms.
+                    # LR is excluded from sol_indices so this is safe — LR's
+                    # oversized bounding box will never erase another room.
+                    others = [clipped_polys[j] for j in sol_indices
+                              if j != i and clipped_polys[j] is not None]
+                    if others:
+                        final = cp.difference(unary_union(others))
+                    else:
+                        final = cp
+
+                if final.is_empty:
+                    result.append(None)
+                elif isinstance(final, Polygon):
+                    result.append(np.array(list(final.exterior.coords)))
+                elif isinstance(final, MultiPolygon):
+                    largest = max(final.geoms, key=lambda p: p.area)
+                    result.append(np.array(list(largest.exterior.coords)))
+                else:
+                    result.append(rb)
 
             except Exception:
-                clipped_rooms.append(rb)
+                result.append(rb)
 
-        drawn = sum(1 for r in clipped_rooms if r is not None)
-        print(f"[DXF] Boundary-clipped {drawn}/{len(rBoundary)} rooms")
-        return clipped_rooms
+        drawn = sum(1 for r in result if r is not None)
+        print(f"[DXF] Clipped {drawn}/{len(rBoundary)} rooms")
+        return result
 
     except Exception as e:
         print(f"[DXF] Warning: Failed to clip polygons: {e}")

@@ -41,9 +41,13 @@ urlpatterns = [
     path(r'index/OptimizeLayout/', views.OptimizeLayout),
     path(r'index/ExpandLivingRoom/', views.ExpandLivingRoom),
     path('index/Export_DXF/', views.Export_DXF),
+    path('index/AlignWalls/', views.AlignWalls),
     path('index/FillWallGaps/', views.FillWallGaps),
     path('index/SnapRooms/', views.SnapRooms),
     path('index/FillLivingRoom/', views.FillLivingRoom),
+    path('index/Log_Boundaries/', views.Log_Boundaries),
+    path('index/Log_Graph/', views.Log_Graph),
+    path('index/FixRooms/', views.FixRooms),
 
 
     path('home', views.home),

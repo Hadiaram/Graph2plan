@@ -47,12 +47,14 @@ global engview, model
 global tf_train, centroids, clusters
 global boxes_pred, indxlist
 global last_fp_data, last_testname
+global user_edited_boundary  # boundary edited by user via drag before/after Generate
 
 # Initialize module-level variables
 boxes_pred = None
 indxlist = None
 last_fp_data = None
 last_testname = None
+user_edited_boundary = None  # numpy array [x, y, dir, isNew], set by UpdateBoundary
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -258,6 +260,7 @@ def loadModel():
 
 
 def LoadTestBoundary(request):
+    global user_edited_boundary
     start = time.perf_counter()
     testName = request.GET.get('testName').split(".")[0]
     print(f"🔍 LoadTestBoundary called with testName={testName}")
@@ -272,6 +275,10 @@ def LoadTestBoundary(request):
     # Handle both mat_struct (dict-like) and object attribute access
     data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
     print(f"   → Loading test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
+
+    # Seed user_edited_boundary with the original so UpdateBoundary has a source before Generate runs
+    user_edited_boundary = np.array(data.boundary, dtype=float)
+
     data_js = {}
     data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
         data.boundary[1][0]) + "," + str(data.boundary[1][1])
@@ -792,7 +799,12 @@ def AdjustGraph(request):
     data_name = test_data_item['name'] if isinstance(test_data_item, dict) or hasattr(test_data_item, '__getitem__') else (test_data_item.name if hasattr(test_data_item, 'name') else 'unknown')
     print(f"   → test_data[{test_index}], name={data_name}, boundary shape={test_data_item.boundary.shape}, rBoundary count={len(test_data_item.rBoundary) if hasattr(test_data_item, 'rBoundary') else 'N/A'}")
 
-    external = np.asarray(test_data_item.boundary)
+    # Use user-edited boundary if available, otherwise fall back to original test data
+    if user_edited_boundary is not None and len(user_edited_boundary) == len(test_data_item.boundary):
+        print(f"   → Using user-edited boundary ({len(user_edited_boundary)} vertices)")
+        external = np.asarray(user_edited_boundary)
+    else:
+        external = np.asarray(test_data_item.boundary)
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
 
@@ -901,6 +913,9 @@ def AdjustGraph(request):
     global last_fp_data, last_testname
     last_fp_data = fp_end.data
     last_testname = testname
+    # Apply user-edited boundary so the optimizer and all subsequent steps use it
+    if user_edited_boundary is not None and len(user_edited_boundary) == len(test_data_item.boundary):
+        last_fp_data.boundary = user_edited_boundary
 
     # Populate indoor with room boundary polygons (rBoundary)
     # This makes the Layout view match the thumbnail images
@@ -919,8 +934,8 @@ def AdjustGraph(request):
                 coords_str = " ".join([f"{x},{y}" for x, y in rb_array])
                 data_js["indoor"].append(coords_str)
 
-    boundary = test_data_item.boundary
-    
+    boundary = external  # already set to user_edited_boundary if available
+
     isNew = boundary[:, 3]
     frontDoor = boundary[[0, 1]]  
     frontDoor = frontDoor[:, [0, 1]]  
@@ -2549,6 +2564,60 @@ def FixRooms(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(_e)}, status=500)
+
+
+def UpdateBoundary(request):
+    global last_fp_data, user_edited_boundary
+
+    points_str = request.GET.get('points', '')
+    if not points_str:
+        return HttpResponse(
+            json.dumps({'error': 'invalid'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    pairs = [p.split(',') for p in points_str.strip().split()]
+    try:
+        new_xy = [(float(x), float(y)) for x, y in pairs]
+    except (ValueError, TypeError):
+        return HttpResponse(
+            json.dumps({'error': 'bad points format'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    # Determine the source boundary (last_fp_data if available, else user_edited_boundary)
+    if last_fp_data is not None:
+        bnd = np.array(last_fp_data.boundary, dtype=float)
+    elif user_edited_boundary is not None:
+        bnd = np.array(user_edited_boundary, dtype=float)
+    else:
+        return HttpResponse(
+            json.dumps({'error': 'no boundary loaded yet'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    if len(new_xy) != len(bnd):
+        return HttpResponse(
+            json.dumps({'error': 'vertex count mismatch'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    for i, (x, y) in enumerate(new_xy):
+        bnd[i, 0] = x
+        bnd[i, 1] = y
+
+    # Always persist to user_edited_boundary so Generate can pick it up
+    user_edited_boundary = bnd
+    # Also update last_fp_data if a layout has been generated
+    if last_fp_data is not None:
+        last_fp_data.boundary = bnd
+
+    print(f"[UpdateBoundary] Saved edited boundary ({len(bnd)} vertices)")
+    return HttpResponse(json.dumps({'status': 'ok'}), content_type='application/json')
 
 if __name__ == "__main__":
     pass

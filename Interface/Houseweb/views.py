@@ -47,12 +47,16 @@ global engview, model
 global tf_train, centroids, clusters
 global boxes_pred, indxlist
 global last_fp_data, last_testname
+global user_edited_boundary  # boundary edited by user via drag before/after Generate
+global current_scale          # mm per pixel; None = unscaled (pixel coords)
 
 # Initialize module-level variables
 boxes_pred = None
 indxlist = None
 last_fp_data = None
 last_testname = None
+user_edited_boundary = None  # numpy array [x, y, dir, isNew], set by UpdateBoundary
+current_scale = None         # float mm/px, set by SetScale view
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -258,6 +262,7 @@ def loadModel():
 
 
 def LoadTestBoundary(request):
+    global user_edited_boundary
     start = time.perf_counter()
     testName = request.GET.get('testName').split(".")[0]
     print(f"🔍 LoadTestBoundary called with testName={testName}")
@@ -272,6 +277,10 @@ def LoadTestBoundary(request):
     # Handle both mat_struct (dict-like) and object attribute access
     data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
     print(f"   → Loading test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
+
+    # Seed user_edited_boundary with the original so UpdateBoundary has a source before Generate runs
+    user_edited_boundary = np.array(data.boundary, dtype=float)
+
     data_js = {}
     data_js["door"] = str(data.boundary[0][0]) + "," + str(data.boundary[0][1]) + "," + str(
         data.boundary[1][0]) + "," + str(data.boundary[1][1])
@@ -792,7 +801,12 @@ def AdjustGraph(request):
     data_name = test_data_item['name'] if isinstance(test_data_item, dict) or hasattr(test_data_item, '__getitem__') else (test_data_item.name if hasattr(test_data_item, 'name') else 'unknown')
     print(f"   → test_data[{test_index}], name={data_name}, boundary shape={test_data_item.boundary.shape}, rBoundary count={len(test_data_item.rBoundary) if hasattr(test_data_item, 'rBoundary') else 'N/A'}")
 
-    external = np.asarray(test_data_item.boundary)
+    # Use user-edited boundary if available, otherwise fall back to original test data
+    if user_edited_boundary is not None and len(user_edited_boundary) == len(test_data_item.boundary):
+        print(f"   → Using user-edited boundary ({len(user_edited_boundary)} vertices)")
+        external = np.asarray(user_edited_boundary)
+    else:
+        external = np.asarray(test_data_item.boundary)
     xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
     ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
 
@@ -901,6 +915,9 @@ def AdjustGraph(request):
     global last_fp_data, last_testname
     last_fp_data = fp_end.data
     last_testname = testname
+    # Apply user-edited boundary so the optimizer and all subsequent steps use it
+    if user_edited_boundary is not None and len(user_edited_boundary) == len(test_data_item.boundary):
+        last_fp_data.boundary = user_edited_boundary
 
     # Populate indoor with room boundary polygons (rBoundary)
     # This makes the Layout view match the thumbnail images
@@ -919,8 +936,8 @@ def AdjustGraph(request):
                 coords_str = " ".join([f"{x},{y}" for x, y in rb_array])
                 data_js["indoor"].append(coords_str)
 
-    boundary = test_data_item.boundary
-    
+    boundary = external  # already set to user_edited_boundary if available
+
     isNew = boundary[:, 3]
     frontDoor = boundary[[0, 1]]  
     frontDoor = frontDoor[:, [0, 1]]  
@@ -1181,6 +1198,87 @@ def AlignWalls(request):
     entries = []
     for i in range(K):
         box = [float(v) for v in aligned_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
+def AdjustBoundary(request):
+    global last_fp_data, last_testname
+
+    if last_fp_data is None:
+        return HttpResponse(
+            json.dumps({'error': 'No layout generated yet. Click Generate first.'}),
+            content_type="application/json",
+            status=400,
+        )
+
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import adjust_boundary_to_rooms, boxes_to_boundaries  # type: ignore
+
+    print("[ADJUST BOUNDARY] Running boundary adjustment pass...")
+    new_boundary = adjust_boundary_to_rooms(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.boundary,
+    )
+    print("[ADJUST BOUNDARY] Done.")
+
+    last_fp_data.boundary  = new_boundary
+    last_fp_data.rBoundary = boxes_to_boundaries(last_fp_data.newBox)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    K = len(last_fp_data.newBox)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in last_fp_data.newBox[i]]
         rtype = int(last_fp_data.rType[i])
         room_name = mdul.room_label[rtype][1]
         area = (box[2] - box[0]) * (box[3] - box[1])
@@ -2130,7 +2228,14 @@ def Export_DXF(request):
         if not dxf_filename.endswith('.dxf'):
             dxf_filename += '.dxf'
 
-        scale = float(custom_scale) if custom_scale else DXF_SCALE
+        if custom_scale:
+            scale = float(custom_scale)
+        elif hasattr(last_fp_data, 'scale') and last_fp_data.scale is not None:
+            scale = float(last_fp_data.scale)
+        elif current_scale is not None:
+            scale = float(current_scale)
+        else:
+            scale = DXF_SCALE
 
         print(f"[DXF Export] Building DXF for {dxf_filename} (scale={scale})...")
         dxf_bytes = build_floorplan_dxf_bytes(
@@ -2468,6 +2573,109 @@ def FixRooms(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(_e)}, status=500)
+
+
+def SetScale(request):
+    global current_scale, last_fp_data, user_edited_boundary
+
+    method = request.GET.get('method', 'width_m')
+    try:
+        value = float(request.GET.get('value', '0'))
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'invalid value'}, status=400)
+
+    if value <= 0:
+        current_scale = None
+        if last_fp_data is not None:
+            last_fp_data.scale = None
+        return JsonResponse({'status': 'cleared', 'scale_mm_per_pixel': None, 'display': 'Unscaled (px)'})
+
+    # Resolve boundary for pixel dimension calculation
+    bnd = None
+    if last_fp_data is not None:
+        bnd = np.array(last_fp_data.boundary, dtype=float)
+    elif user_edited_boundary is not None:
+        bnd = np.array(user_edited_boundary, dtype=float)
+    if bnd is None:
+        return JsonResponse({'error': 'no boundary loaded'}, status=400)
+
+    if method == 'width_m':
+        pixel_width = float(np.max(bnd[:, 0]) - np.min(bnd[:, 0]))
+        if pixel_width <= 0:
+            return JsonResponse({'error': 'invalid boundary width'}, status=400)
+        current_scale = (value * 1000.0) / pixel_width
+    elif method == 'area_m2':
+        x, y = bnd[:, 0], bnd[:, 1]
+        pixel_area = 0.5 * abs(float(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
+        if pixel_area <= 0:
+            return JsonResponse({'error': 'invalid boundary area'}, status=400)
+        current_scale = math.sqrt((value * 1.0e6) / pixel_area)
+    else:
+        return JsonResponse({'error': 'unknown method'}, status=400)
+
+    if last_fp_data is not None:
+        last_fp_data.scale = current_scale
+
+    print(f"[SetScale] method={method}, value={value}, scale={current_scale:.4f} mm/px")
+    return JsonResponse({
+        'status': 'ok',
+        'scale_mm_per_pixel': round(current_scale, 4),
+        'display': f"1px = {current_scale:.3f} mm",
+    })
+
+
+def UpdateBoundary(request):
+    global last_fp_data, user_edited_boundary
+
+    points_str = request.GET.get('points', '')
+    if not points_str:
+        return HttpResponse(
+            json.dumps({'error': 'invalid'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    pairs = [p.split(',') for p in points_str.strip().split()]
+    try:
+        new_xy = [(float(x), float(y)) for x, y in pairs]
+    except (ValueError, TypeError):
+        return HttpResponse(
+            json.dumps({'error': 'bad points format'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    # Determine the source boundary (last_fp_data if available, else user_edited_boundary)
+    if last_fp_data is not None:
+        bnd = np.array(last_fp_data.boundary, dtype=float)
+    elif user_edited_boundary is not None:
+        bnd = np.array(user_edited_boundary, dtype=float)
+    else:
+        return HttpResponse(
+            json.dumps({'error': 'no boundary loaded yet'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    if len(new_xy) != len(bnd):
+        return HttpResponse(
+            json.dumps({'error': 'vertex count mismatch'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    for i, (x, y) in enumerate(new_xy):
+        bnd[i, 0] = x
+        bnd[i, 1] = y
+
+    # Always persist to user_edited_boundary so Generate can pick it up
+    user_edited_boundary = bnd
+    # Also update last_fp_data if a layout has been generated
+    if last_fp_data is not None:
+        last_fp_data.boundary = bnd
+
+    print(f"[UpdateBoundary] Saved edited boundary ({len(bnd)} vertices)")
+    return HttpResponse(json.dumps({'status': 'ok'}), content_type='application/json')
 
 if __name__ == "__main__":
     pass

@@ -48,6 +48,9 @@ urlpatterns = [
     path('index/Log_Boundaries/', views.Log_Boundaries),
     path('index/Log_Graph/', views.Log_Graph),
     path('index/FixRooms/', views.FixRooms),
+    path('index/AdjustBoundary/', views.AdjustBoundary),
+    path('index/UpdateBoundary/', views.UpdateBoundary),
+    path('index/SetScale/', views.SetScale),
 
 
     path('home', views.home),

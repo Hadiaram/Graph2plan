@@ -566,8 +566,10 @@ function LoadTestBoundary(files) {
         var border = 4;
         islLoadTest = 1;
         var hsex = ret['exterior'];
+        currentBoundaryPoints = hsex;
         d3.select("#LeftBaseSVG")
             .append("polygon")
+            .attr("class", "exterior-boundary")
             .attr("points", hsex)
             .attr("fill", "none")
             .attr("stroke", roomcolor("Exterior wall"))
@@ -615,7 +617,8 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
     var interior_color = roomcolor("Interior wall");
     var border = 4;
     console.log("CreateLeftPlan", roombx);
-    
+    currentBoundaryPoints = hsex;
+
     // Create clipPath first
     d3.select("#LeftLayoutSVG").append("clipPath")
         .attr("id", "clip-th")
@@ -660,6 +663,7 @@ function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize
 
     d3.select("#LeftLayoutSVG")
         .append("polygon")
+        .attr("class", "exterior-boundary")
         .attr("points", hsex)
         .attr("fill", "none")
         .attr("stroke", roomcolor("Exterior wall"))
@@ -1178,6 +1182,8 @@ function CreateLeftFloorPlan(boxes, exterior, door) {
         fillGapsBtn2.style.backgroundColor = "#388E3C";
     }
 
+    currentBoundaryPoints = exterior;
+
     // Clear existing floor plan
     d3.select('#LeftLayoutSVG').selectAll('rect').remove();
     d3.select('#LeftLayoutSVG').selectAll('polygon').remove();
@@ -1222,6 +1228,7 @@ function CreateLeftFloorPlan(boxes, exterior, door) {
     // Draw boundary polygon
     d3.select("#LeftLayoutSVG")
         .append("polygon")
+        .attr("class", "exterior-boundary")
         .attr("points", exterior)
         .attr("fill", "none")
         .attr("stroke", roomcolor("Exterior wall"))
@@ -1296,6 +1303,8 @@ function CreateLeftGraph(rooms, roomID) {
                 if (measureBtn) { measureBtn.style.display = "block"; }
                 var fixRoomsBtn = document.getElementById("fixRoomsButton");
                 if (fixRoomsBtn) { fixRoomsBtn.style.display = "block"; }
+                var adjustBndBtn = document.getElementById("adjustBoundaryButton");
+                if (adjustBndBtn) { adjustBndBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1599,6 +1608,23 @@ function CreateLeftGraph(rooms, roomID) {
             });
         };
 
+        // Adjust Boundary button handler
+        document.getElementById("adjustBoundaryButton").onclick = function () {
+            var btn = document.getElementById("adjustBoundaryButton");
+            btn.textContent = "Adjusting...";
+            btn.style.backgroundColor = "#311B92";
+            $.get("/index/AdjustBoundary/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Adjust Boundary";
+                btn.style.backgroundColor = "#4527A0";
+            }).fail(function (xhr, status, error) {
+                console.error("❌ AdjustBoundary FAILED:", xhr.responseText);
+                alert("Adjust Boundary failed. Check server console for details.");
+                btn.textContent = "Adjust Boundary";
+                btn.style.backgroundColor = "#4527A0";
+            });
+        };
+
         // Measure button toggle handler
         document.getElementById("measureButton").onclick = function () {
             measureMode = !measureMode;
@@ -1716,6 +1742,27 @@ function CreateLeftGraph(rooms, roomID) {
         };
 
         // Export DXF button handler — triggers a browser file download
+        document.getElementById("setScaleButton").onclick = function () {
+            var method = document.getElementById("scaleMethod").value;
+            var value = parseFloat(document.getElementById("scaleValue").value) || 0;
+            var statusEl = document.getElementById("scaleStatus");
+
+            $.get("/index/SetScale/", {method: method, value: value}, function (ret) {
+                if (ret.scale_mm_per_pixel) {
+                    statusEl.textContent = ret.display;
+                    statusEl.style.color = "#2E7D32";
+                } else {
+                    statusEl.textContent = "Unscaled (px)";
+                    statusEl.style.color = "#888";
+                }
+            }).fail(function (xhr) {
+                var msg = "Error";
+                try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+                statusEl.textContent = msg;
+                statusEl.style.color = "#c62828";
+            });
+        };
+
         document.getElementById("exportDXFButton").onclick = function () {
             var dxfBtn = document.getElementById("exportDXFButton");
             var originalText = dxfBtn.innerHTML;
@@ -2381,14 +2428,103 @@ function rect_click() {
     focus_rect = "click";
 }
 
-// Toggle graph visibility
+// Edit Boundary toggle
+var editBoundaryMode = false;
+var currentBoundaryPoints = "";   // latest exterior polygon points string "x1,y1 x2,y2 ..."
+
+// --- Boundary edit helpers ---
+
+function parseBoundaryPoints(str) {
+    if (!str || !str.trim()) return [];
+    return str.trim().split(/\s+/).map(function(p) {
+        var c = p.split(',');
+        return [parseFloat(c[0]), parseFloat(c[1])];
+    });
+}
+
+function boundaryPointsToString(pts) {
+    return pts.map(function(p) { return p[0] + ',' + p[1]; }).join(' ');
+}
+
+function svgCoords(svgEl, clientX, clientY) {
+    var pt = svgEl.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    return pt.matrixTransform(svgEl.getScreenCTM().inverse());
+}
+
+function renderBoundaryHandles() {
+    d3.select('#LeftGraphSVG').select('#boundaryHandles').remove();
+    if (!editBoundaryMode || !currentBoundaryPoints) return;
+
+    var pts = parseBoundaryPoints(currentBoundaryPoints);
+    var N = pts.length;
+    if (N < 2) return;
+
+    var svgEl = document.getElementById('LeftGraphSVG');
+    var svg = d3.select('#LeftGraphSVG');
+    var g = svg.append('g').attr('id', 'boundaryHandles');
+
+    for (var i = 0; i < N; i++) {
+        var j = (i + 1) % N;
+        var isVert  = Math.abs(pts[i][0] - pts[j][0]) < 1.0;  // vertical wall   → drag x
+        var isHoriz = Math.abs(pts[i][1] - pts[j][1]) < 1.0;  // horizontal wall → drag y
+        if (!isVert && !isHoriz) continue;
+
+        (function(si, sj, vert) {
+            var drag = d3.drag()
+                .on('drag', function() {
+                    var p = svgCoords(svgEl,
+                        d3.event.sourceEvent.clientX,
+                        d3.event.sourceEvent.clientY);
+                    if (vert) {
+                        pts[si][0] = p.x;
+                        pts[sj][0] = p.x;
+                        d3.select(this).attr('cx', p.x);
+                    } else {
+                        pts[si][1] = p.y;
+                        pts[sj][1] = p.y;
+                        d3.select(this).attr('cy', p.y);
+                    }
+                    var newPts = boundaryPointsToString(pts);
+                    currentBoundaryPoints = newPts;
+                    d3.selectAll('.exterior-boundary').attr('points', newPts);
+                    d3.select('#clip-th polygon').attr('points', newPts);
+                    d3.select('#left-clip-transferred polygon').attr('points', newPts);
+                })
+                .on('end', function() {
+                    currentBoundaryPoints = boundaryPointsToString(pts);
+                    // Re-render handles so adjacent handle midpoints are correct
+                    renderBoundaryHandles();
+                    // Sync to backend
+                    $.get('/index/UpdateBoundary/', {points: currentBoundaryPoints},
+                        function() { console.log('[BOUNDARY] Synced to server'); }
+                    ).fail(function(xhr) {
+                        console.error('[BOUNDARY] Sync failed:', xhr.responseText);
+                    });
+                });
+
+            g.append('circle')
+                .attr('cx', (pts[si][0] + pts[sj][0]) / 2)
+                .attr('cy', (pts[si][1] + pts[sj][1]) / 2)
+                .attr('r', 6)
+                .attr('fill', vert ? '#E65100' : '#1565C0')
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 1.5)
+                .attr('opacity', 0.85)
+                .style('cursor', vert ? 'ew-resize' : 'ns-resize')
+                .call(drag);
+        })(i, j, isVert);
+    }
+}
+
 $(document).ready(function () {
-    document.getElementById("toggleGraphButton").onclick = function () {
-        var svg = document.getElementById("LeftGraphSVG");
-        var btn = document.getElementById("toggleGraphButton");
-        var hidden = svg.style.display === "none";
-        svg.style.display = hidden ? "block" : "none";
-        btn.textContent = hidden ? "Hide Graph" : "Show Graph";
-        btn.style.backgroundColor = hidden ? "#546E7A" : "#37474F";
+    document.getElementById("editBoundaryToggle").onclick = function () {
+        editBoundaryMode = !editBoundaryMode;
+        var btn = document.getElementById("editBoundaryToggle");
+        btn.textContent = editBoundaryMode ? "Edit Boundary: ON" : "Edit Boundary: OFF";
+        btn.style.backgroundColor = editBoundaryMode ? "#E65100" : "#37474F";
+        renderBoundaryHandles();
     };
 });
+

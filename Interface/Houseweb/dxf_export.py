@@ -93,6 +93,10 @@ def save_floorplan_dxf(fp_data, filepath, scale=1.0, wall_thickness=3.0,
         doc = ezdxf.new('R2018', setup=True)
         msp = doc.modelspace()
 
+        # Set drawing units so CAD software interprets coordinates correctly
+        if scale != 1.0:
+            doc.header['$INSUNITS'] = 4  # 4 = Millimeters
+
         # Define layers with colors
         doc.layers.new('EXTERIOR_WALL', dxfattribs={'color': 7})   # White/gray
         doc.layers.new('INTERIOR_WALL', dxfattribs={'color': 8})   # Dark gray

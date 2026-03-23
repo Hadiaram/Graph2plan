@@ -1742,6 +1742,27 @@ function CreateLeftGraph(rooms, roomID) {
         };
 
         // Export DXF button handler — triggers a browser file download
+        document.getElementById("setScaleButton").onclick = function () {
+            var method = document.getElementById("scaleMethod").value;
+            var value = parseFloat(document.getElementById("scaleValue").value) || 0;
+            var statusEl = document.getElementById("scaleStatus");
+
+            $.get("/index/SetScale/", {method: method, value: value}, function (ret) {
+                if (ret.scale_mm_per_pixel) {
+                    statusEl.textContent = ret.display;
+                    statusEl.style.color = "#2E7D32";
+                } else {
+                    statusEl.textContent = "Unscaled (px)";
+                    statusEl.style.color = "#888";
+                }
+            }).fail(function (xhr) {
+                var msg = "Error";
+                try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+                statusEl.textContent = msg;
+                statusEl.style.color = "#c62828";
+            });
+        };
+
         document.getElementById("exportDXFButton").onclick = function () {
             var dxfBtn = document.getElementById("exportDXFButton");
             var originalText = dxfBtn.innerHTML;

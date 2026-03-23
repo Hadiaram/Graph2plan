@@ -50,6 +50,7 @@ urlpatterns = [
     path('index/FixRooms/', views.FixRooms),
     path('index/AdjustBoundary/', views.AdjustBoundary),
     path('index/UpdateBoundary/', views.UpdateBoundary),
+    path('index/SetScale/', views.SetScale),
 
 
     path('home', views.home),

@@ -48,6 +48,7 @@ global tf_train, centroids, clusters
 global boxes_pred, indxlist
 global last_fp_data, last_testname
 global user_edited_boundary  # boundary edited by user via drag before/after Generate
+global current_scale          # mm per pixel; None = unscaled (pixel coords)
 
 # Initialize module-level variables
 boxes_pred = None
@@ -55,6 +56,7 @@ indxlist = None
 last_fp_data = None
 last_testname = None
 user_edited_boundary = None  # numpy array [x, y, dir, isNew], set by UpdateBoundary
+current_scale = None         # float mm/px, set by SetScale view
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -2226,7 +2228,14 @@ def Export_DXF(request):
         if not dxf_filename.endswith('.dxf'):
             dxf_filename += '.dxf'
 
-        scale = float(custom_scale) if custom_scale else DXF_SCALE
+        if custom_scale:
+            scale = float(custom_scale)
+        elif hasattr(last_fp_data, 'scale') and last_fp_data.scale is not None:
+            scale = float(last_fp_data.scale)
+        elif current_scale is not None:
+            scale = float(current_scale)
+        else:
+            scale = DXF_SCALE
 
         print(f"[DXF Export] Building DXF for {dxf_filename} (scale={scale})...")
         dxf_bytes = build_floorplan_dxf_bytes(
@@ -2564,6 +2573,55 @@ def FixRooms(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(_e)}, status=500)
+
+
+def SetScale(request):
+    global current_scale, last_fp_data, user_edited_boundary
+
+    method = request.GET.get('method', 'width_m')
+    try:
+        value = float(request.GET.get('value', '0'))
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'invalid value'}, status=400)
+
+    if value <= 0:
+        current_scale = None
+        if last_fp_data is not None:
+            last_fp_data.scale = None
+        return JsonResponse({'status': 'cleared', 'scale_mm_per_pixel': None, 'display': 'Unscaled (px)'})
+
+    # Resolve boundary for pixel dimension calculation
+    bnd = None
+    if last_fp_data is not None:
+        bnd = np.array(last_fp_data.boundary, dtype=float)
+    elif user_edited_boundary is not None:
+        bnd = np.array(user_edited_boundary, dtype=float)
+    if bnd is None:
+        return JsonResponse({'error': 'no boundary loaded'}, status=400)
+
+    if method == 'width_m':
+        pixel_width = float(np.max(bnd[:, 0]) - np.min(bnd[:, 0]))
+        if pixel_width <= 0:
+            return JsonResponse({'error': 'invalid boundary width'}, status=400)
+        current_scale = (value * 1000.0) / pixel_width
+    elif method == 'area_m2':
+        x, y = bnd[:, 0], bnd[:, 1]
+        pixel_area = 0.5 * abs(float(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
+        if pixel_area <= 0:
+            return JsonResponse({'error': 'invalid boundary area'}, status=400)
+        current_scale = math.sqrt((value * 1.0e6) / pixel_area)
+    else:
+        return JsonResponse({'error': 'unknown method'}, status=400)
+
+    if last_fp_data is not None:
+        last_fp_data.scale = current_scale
+
+    print(f"[SetScale] method={method}, value={value}, scale={current_scale:.4f} mm/px")
+    return JsonResponse({
+        'status': 'ok',
+        'scale_mm_per_pixel': round(current_scale, 4),
+        'display': f"1px = {current_scale:.3f} mm",
+    })
 
 
 def UpdateBoundary(request):

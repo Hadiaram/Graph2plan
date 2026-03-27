@@ -574,6 +574,7 @@ function LoadTestBoundary(files) {
         islLoadTest = 1;
         var hsex = ret['exterior'];
         currentBoundaryPoints = hsex;
+        originalBoundaryPoints = hsex;
         d3.select("#LeftBaseSVG")
             .append("polygon")
             .attr("class", "exterior-boundary")
@@ -2437,7 +2438,8 @@ function rect_click() {
 
 // Edit Boundary toggle
 var editBoundaryMode = false;
-var currentBoundaryPoints = "";   // latest exterior polygon points string "x1,y1 x2,y2 ..."
+var currentBoundaryPoints = "";    // latest exterior polygon points string "x1,y1 x2,y2 ..."
+var originalBoundaryPoints = "";   // snapshot at load time — used by Reset Boundary
 
 // --- Boundary edit helpers ---
 
@@ -2533,6 +2535,26 @@ $(document).ready(function () {
         btn.style.backgroundColor = editBoundaryMode ? "#E65100" : "#37474F";
         renderBoundaryHandles();
     };
+
+    document.getElementById("resetBoundaryButton").onclick = function () {
+        var hsname = null;
+        var arr, reg = new RegExp("(^| )hsname=([^;]*)(;|$)");
+        if (arr = document.cookie.match(reg)) hsname = arr[2];
+        if (!hsname) return;
+
+        $.get("/index/LoadTestBoundary", {'testName': hsname}, function (ret) {
+            var pts = ret['exterior'];
+            currentBoundaryPoints = pts;
+            originalBoundaryPoints = pts;
+            d3.selectAll('.exterior-boundary').attr('points', pts);
+            d3.select('#clip-th polygon').attr('points', pts);
+            d3.select('#left-clip-transferred polygon').attr('points', pts);
+            renderBoundaryHandles();
+            $.get('/index/UpdateBoundary/', {points: pts},
+                function() { console.log('[BOUNDARY] Reset synced to server'); }
+            );
+        });
+    };
 });
 
 // ---------------------------------------------------------------------------
@@ -2562,6 +2584,7 @@ function loadDXFBoundary(file) {
             _selectedDoorWallIdx = -1;
 
             currentBoundaryPoints = ret.exterior;
+            originalBoundaryPoints = ret.exterior;
 
             // Draw the boundary outline
             d3.select("#LeftBaseSVG")

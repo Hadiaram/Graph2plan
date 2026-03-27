@@ -638,7 +638,11 @@
 
                 <div style="width: 100%;margin-left: 4%;margin-top: 2%;">
                     <div style="margin-bottom: 6px;">
-                        <div id="editBoundaryToggle"
+                        <div id="confirmFrontDoorButton"
+                         style="display:none;cursor:pointer;background-color:#2E7D32;color:#fff;width:160px;border-radius:30px;text-align:center;vertical-align:middle;line-height:30px;height:30px;margin-bottom:6px;">
+                        ✔ Confirm Front Door
+                    </div>
+                    <div id="editBoundaryToggle"
                              style="cursor: pointer;background-color: #37474F;color: #fff;width: 160px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;display: inline-block;">
                             Edit Boundary: OFF
                         </div>
@@ -811,6 +815,22 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Scale input above right panel -->
+                    <div style="position: absolute; margin-left: 736px; margin-top: -34px; display: flex; align-items: center; gap: 6px;">
+                        <span style="color: #555; font-size: 13px; white-space: nowrap;">Scale:</span>
+                        <select id="scaleMethod" style="height: 26px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px; padding: 0 4px;">
+                            <option value="width_m">Width (m)</option>
+                            <option value="area_m2">Area (m²)</option>
+                        </select>
+                        <input id="scaleValue" type="number" min="0" step="0.1" placeholder="e.g. 10"
+                               style="width: 80px; height: 26px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px; padding: 0 6px; box-sizing: border-box;">
+                        <div id="setScaleButton"
+                             style="cursor: pointer; background-color: #546E7A; color: #fff; width: 50px; border-radius: 30px; text-align: center; line-height: 26px; height: 26px; font-size: 12px;">
+                            Set
+                        </div>
+                        <span id="scaleStatus" style="color: #888; font-size: 12px; white-space: nowrap;">Unscaled (px)</span>
+                    </div>
+
                     <div id="rightbox"
                          style="border:2px solid #d2d2d2;width: 516px;height: 516px;    position: absolute;margin-left: 736px;border-radius: 20px;">
                         <svg id="RightLayoutSVG" width="256" height="256" viewBox="-30 -30 316 316"
@@ -900,22 +920,6 @@
                 <div id="adjustBoundaryButton"
                      style="cursor: pointer;background-color: #4527A0;color: #fff;width: 120px;border-radius: 30px;text-align: center;vertical-align: middle;line-height: 30px;height: 30px;position: absolute;margin-left: 880px;margin-top: 40px;display: none;">
                     Adjust Boundary
-                </div>
-
-                <!-- Row 3: scale input -->
-                <div style="position: absolute; margin-top: 80px; display: flex; align-items: center; gap: 6px;">
-                    <span style="color: #555; font-size: 13px; white-space: nowrap;">Scale:</span>
-                    <select id="scaleMethod" style="height: 26px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px; padding: 0 4px;">
-                        <option value="width_m">Width (m)</option>
-                        <option value="area_m2">Area (m²)</option>
-                    </select>
-                    <input id="scaleValue" type="number" min="0" step="0.1" placeholder="e.g. 10"
-                           style="width: 80px; height: 26px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px; padding: 0 6px; box-sizing: border-box;">
-                    <div id="setScaleButton"
-                         style="cursor: pointer; background-color: #546E7A; color: #fff; width: 50px; border-radius: 30px; text-align: center; line-height: 26px; height: 26px; font-size: 12px;">
-                        Set
-                    </div>
-                    <span id="scaleStatus" style="color: #888; font-size: 12px; white-space: nowrap;">Unscaled (px)</span>
                 </div>
 
                 <div id="transfer"

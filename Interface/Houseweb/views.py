@@ -49,6 +49,7 @@ global boxes_pred, indxlist
 global last_fp_data, last_testname
 global user_edited_boundary  # boundary edited by user via drag before/after Generate
 global current_scale          # mm per pixel; None = unscaled (pixel coords)
+global dxf_entries, dxf_names  # DXF-uploaded boundaries, preserved across getTestData reloads
 
 # Initialize module-level variables
 boxes_pred = None
@@ -57,6 +58,8 @@ last_fp_data = None
 last_testname = None
 user_edited_boundary = None  # numpy array [x, y, dir, isNew], set by UpdateBoundary
 current_scale = None         # float mm/px, set by SetScale view
+dxf_entries = []             # list of DXFEntry objects registered this session
+dxf_names   = []             # corresponding name strings
 
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
@@ -211,15 +214,23 @@ def loadRetrieval():
 
 def getTestData():
     start = time.perf_counter()
-    global test_data, testNameList, trainNameList
- 
+    global test_data, testNameList, trainNameList, dxf_entries, dxf_names
+
     test_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_converted.pkl', 'rb'))
     # Strip trailing spaces from name lists to match image filenames
     test_data, testNameList, trainNameList = (
-        test_data['data'],
+        list(test_data['data']),
         [str(n).strip() for n in test_data['testNameList']],
         [str(n).strip() for n in test_data['trainNameList']]
     )
+
+    # Re-append any DXF-registered entries so they survive reloads
+    if dxf_entries:
+        for entry, name in zip(dxf_entries, dxf_names):
+            if name not in testNameList:
+                test_data.append(entry)
+                testNameList.append(name)
+        print(f"📊 Re-appended {len(dxf_entries)} DXF boundary entries")
 
     print(f"📊 Loaded {len(test_data)} test floor plans")
     print(f"📊 testNameList has {len(testNameList)} names: {testNameList[:10]}")
@@ -291,6 +302,120 @@ def LoadTestBoundary(request):
     end = time.perf_counter()
     print('LoadTestBoundary time: %s Seconds' % (end - start))
     return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
+from django.views.decorators.csrf import csrf_exempt  # type: ignore
+
+@csrf_exempt
+def ParseDXFBoundary(request):
+    """
+    Parse an uploaded DXF file and return boundary points for front door selection.
+    Does NOT register the boundary yet — that happens in RegisterDXFBoundary.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    f = request.FILES.get('file')
+    if not f:
+        return JsonResponse({'error': 'no file uploaded'}, status=400)
+
+    try:
+        from Houseweb.dxf_import import parse_dxf_boundary, normalize_to_256  # type: ignore
+        file_bytes = f.read()
+        name = f.name.rsplit('.', 1)[0]
+
+        pts, units_to_mm = parse_dxf_boundary(file_bytes)
+        norm_pts, scale_mm_per_px = normalize_to_256(pts, units_to_mm)
+
+        exterior = ' '.join(f'{x},{y}' for x, y in norm_pts)
+
+        # Wall segments: each wall is [x1, y1, x2, y2, mid_x, mid_y]
+        n = len(norm_pts)
+        walls = []
+        for i in range(n):
+            j = (i + 1) % n
+            x1, y1 = norm_pts[i]
+            x2, y2 = norm_pts[j]
+            walls.append([x1, y1, x2, y2, (x1 + x2) / 2, (y1 + y2) / 2])
+
+        print(f"[ParseDXF] Parsed '{name}': {n} vertices, scale={scale_mm_per_px:.3f} mm/px")
+        return JsonResponse({
+            'exterior': exterior,
+            'walls': walls,
+            'name': name,
+            'scale_mm_per_pixel': scale_mm_per_px,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def RegisterDXFBoundary(request):
+    """
+    Register a parsed DXF boundary (with front door selected) into the in-memory dataset.
+    Returns {exterior, door, name} — same format as LoadTestBoundary.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    global test_data, testNameList, user_edited_boundary, current_scale
+    global dxf_entries, dxf_names
+
+    try:
+        points_str    = request.POST.get('points', '')
+        door_wall_idx = int(request.POST.get('door_wall_idx', '0'))
+        name          = request.POST.get('name', 'dxf_boundary')
+        scale         = float(request.POST.get('scale', '1.0'))
+
+        if not points_str:
+            return JsonResponse({'error': 'no points provided'}, status=400)
+
+        pairs    = [p.split(',') for p in points_str.strip().split()]
+        norm_pts = [(float(x), float(y)) for x, y in pairs]
+
+        from Houseweb.dxf_import import build_boundary_array  # type: ignore
+        boundary = build_boundary_array(norm_pts, door_wall_idx)
+
+        # Make name unique if it already exists
+        unique_name = name
+        counter = 1
+        while unique_name in testNameList:
+            unique_name = f"{name}_{counter}"
+            counter += 1
+
+        # Build minimal data entry — only .boundary is needed by the ML model
+        entry = type('DXFEntry', (), {})()
+        entry.name       = unique_name
+        entry.boundary   = boundary
+        entry.box        = np.zeros((0, 5), dtype=float)
+        entry.rType      = np.zeros((0,),   dtype=int)
+        entry.rBoundary  = []
+        entry.rEdge      = np.zeros((0, 3), dtype=int)
+        entry.scale      = scale
+
+        # Register in persistent DXF list and in-memory dataset
+        dxf_entries.append(entry)
+        dxf_names.append(unique_name)
+        test_data.append(entry)
+        testNameList.append(unique_name)
+
+        # Set as the active boundary
+        user_edited_boundary = boundary
+        current_scale        = scale
+
+        ex   = ' '.join(f'{boundary[i, 0]},{boundary[i, 1]}' for i in range(len(boundary)))
+        door = f'{boundary[0, 0]},{boundary[0, 1]},{boundary[1, 0]},{boundary[1, 1]}'
+
+        print(f"[RegisterDXF] Registered '{unique_name}': {len(boundary)} vertices, scale={scale:.3f} mm/px")
+        return JsonResponse({'exterior': ex, 'door': door, 'name': unique_name})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 def get_filter_func(mask, acc, num):

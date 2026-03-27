@@ -561,6 +561,13 @@ function LoadTestBoundary(files) {
 
     var file = files[0];
     console.log(file.name);
+
+    // Route DXF files through the DXF upload flow
+    if (file.name.toLowerCase().endsWith('.dxf')) {
+        loadDXFBoundary(file);
+        return;
+    }
+
     document.cookie = "hsname=" + file.name;
     $.get("/index/LoadTestBoundary", {'testName': file.name}, function (ret) {
         var border = 4;
@@ -2525,6 +2532,155 @@ $(document).ready(function () {
         btn.textContent = editBoundaryMode ? "Edit Boundary: ON" : "Edit Boundary: OFF";
         btn.style.backgroundColor = editBoundaryMode ? "#E65100" : "#37474F";
         renderBoundaryHandles();
+    };
+});
+
+// ---------------------------------------------------------------------------
+// DXF boundary upload flow
+// ---------------------------------------------------------------------------
+
+var _dxfWalls = [];          // walls from ParseDXFBoundary: [[x1,y1,x2,y2,mid_x,mid_y],...]
+var _dxfName  = '';          // filename stem
+var _dxfScale = 1.0;         // mm/px from ParseDXFBoundary
+var _selectedDoorWallIdx = -1;
+
+function loadDXFBoundary(file) {
+    var fd = new FormData();
+    fd.append('file', file);
+
+    $.ajax({
+        url: '/index/ParseDXFBoundary/',
+        type: 'POST',
+        data: fd,
+        processData: false,
+        contentType: false,
+        success: function (ret) {
+            islLoadTest = 1;
+            _dxfWalls = ret.walls;
+            _dxfName  = ret.name;
+            _dxfScale = ret.scale_mm_per_pixel;
+            _selectedDoorWallIdx = -1;
+
+            currentBoundaryPoints = ret.exterior;
+
+            // Draw the boundary outline
+            d3.select("#LeftBaseSVG")
+                .append("polygon")
+                .attr("class", "exterior-boundary")
+                .attr("points", ret.exterior)
+                .attr("fill", "none")
+                .attr("stroke", roomcolor("Exterior wall"))
+                .attr("stroke-width", 4);
+
+            d3.select('body').select('#LeftBaseSVG').attr("transform", "scale(1.5)");
+            d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
+
+            // Show wall selection handles for front door choice
+            _renderDoorWallHandles();
+
+            // Show the confirm button
+            var cfBtn = document.getElementById("confirmFrontDoorButton");
+            if (cfBtn) { cfBtn.style.display = "block"; }
+        },
+        error: function (xhr) {
+            alert("DXF parse failed: " + (xhr.responseJSON ? xhr.responseJSON.error : xhr.responseText));
+        }
+    });
+}
+
+function _renderDoorWallHandles() {
+    d3.select('#LeftGraphSVG').select('#dxfDoorHandles').remove();
+    if (!_dxfWalls || !_dxfWalls.length) return;
+
+    var g = d3.select('#LeftGraphSVG').append('g').attr('id', 'dxfDoorHandles');
+
+    _dxfWalls.forEach(function (w, i) {
+        var mx = w[4], my = w[5];
+        var isSelected = (i === _selectedDoorWallIdx);
+        g.append('circle')
+            .attr('id', 'dxfWall_' + i)
+            .attr('cx', mx)
+            .attr('cy', my)
+            .attr('r', 7)
+            .attr('fill', isSelected ? '#FF6F00' : '#2E7D32')
+            .attr('stroke', '#fff')
+            .attr('stroke-width', 2)
+            .attr('opacity', 0.9)
+            .style('cursor', 'pointer')
+            .on('click', function () {
+                _selectedDoorWallIdx = i;
+                // Recolor all handles
+                g.selectAll('circle')
+                    .attr('fill', '#2E7D32');
+                d3.select(this).attr('fill', '#FF6F00');
+            });
+    });
+}
+
+function _clearDoorWallHandles() {
+    d3.select('#LeftGraphSVG').select('#dxfDoorHandles').remove();
+}
+
+$(document).ready(function () {
+    var cfBtn = document.getElementById("confirmFrontDoorButton");
+    if (!cfBtn) return;
+
+    cfBtn.onclick = function () {
+        if (_selectedDoorWallIdx < 0) {
+            alert("Please click a green circle to select the front door wall first.");
+            return;
+        }
+
+        cfBtn.textContent = "Registering…";
+        cfBtn.style.backgroundColor = "#616161";
+
+        var fd = new FormData();
+        fd.append('points', currentBoundaryPoints);
+        fd.append('door_wall_idx', _selectedDoorWallIdx);
+        fd.append('name', _dxfName);
+        fd.append('scale', _dxfScale);
+
+        $.ajax({
+            url: '/index/RegisterDXFBoundary/',
+            type: 'POST',
+            data: fd,
+            processData: false,
+            contentType: false,
+            success: function (ret) {
+                // Set cookie so NumSearch knows which entry to use
+                document.cookie = "hsname=" + ret.name;
+
+                // Draw the front door line
+                var door = ret.door.split(",");
+                d3.select('#LeftBaseSVG').append('line')
+                    .attr("x1", parseFloat(door[0]))
+                    .attr("y1", parseFloat(door[1]))
+                    .attr("x2", parseFloat(door[2]))
+                    .attr("y2", parseFloat(door[3]))
+                    .attr("stroke", roomcolor("Front door"))
+                    .attr("stroke-width", 4);
+
+                // Update scale display if scaleStatus element exists
+                var scaleStatus = document.getElementById("scaleStatus");
+                if (scaleStatus) {
+                    scaleStatus.textContent = _dxfScale.toFixed(3) + " mm/px";
+                }
+
+                // Hide confirm button, remove wall handles
+                cfBtn.style.display = "none";
+                cfBtn.textContent = "✔ Confirm Front Door";
+                cfBtn.style.backgroundColor = "#2E7D32";
+                _clearDoorWallHandles();
+
+                // Proceed to room count search (same as normal load)
+                NumSearch();
+            },
+            error: function (xhr) {
+                alert("Registration failed: " + (xhr.responseJSON ? xhr.responseJSON.error : xhr.responseText));
+                cfBtn.textContent = "✔ Confirm Front Door";
+                cfBtn.style.backgroundColor = "#2E7D32";
+            }
+        });
     };
 });
 

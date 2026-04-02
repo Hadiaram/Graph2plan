@@ -1313,6 +1313,8 @@ function CreateLeftGraph(rooms, roomID) {
                 if (fixRoomsBtn) { fixRoomsBtn.style.display = "block"; }
                 var adjustBndBtn = document.getElementById("adjustBoundaryButton");
                 if (adjustBndBtn) { adjustBndBtn.style.display = "block"; }
+                var enforceBtn = document.getElementById("enforceRoomSizesButton");
+                if (enforceBtn) { enforceBtn.style.display = "block"; }
                 console.log(adjust_ret['rmpos']);
 
                 for (var i = 0; i < adjust_ret['rmpos'].length; i++) {
@@ -1614,6 +1616,101 @@ function CreateLeftGraph(rooms, roomID) {
                 btn.textContent = "Fix Rooms";
                 btn.style.backgroundColor = "#AD1457";
             });
+        };
+
+        // Enforce Room Sizes button handler
+        document.getElementById("enforceRoomSizesButton").onclick = function () {
+            var btn = document.getElementById("enforceRoomSizesButton");
+
+            // Check if scale is set — prompt user if not
+            var scaleStatus = document.getElementById("scaleStatus");
+            var scaleMissing = !scaleStatus || scaleStatus.textContent.trim() === "" ||
+                               scaleStatus.textContent.indexOf("Unscaled") !== -1 ||
+                               scaleStatus.textContent.indexOf("px") !== -1;
+            if (scaleMissing) {
+                var scaleVal = prompt(
+                    "No scale is set. Enter the real-world width of the boundary in metres to continue:"
+                );
+                if (!scaleVal || isNaN(parseFloat(scaleVal)) || parseFloat(scaleVal) <= 0) {
+                    alert("Scale not set. Enforce Sizes cancelled.");
+                    return;
+                }
+                $.get("/index/SetScale/", {method: "width_m", value: parseFloat(scaleVal)}, function (ret) {
+                    if (ret.scale_mm_per_pixel && scaleStatus) {
+                        scaleStatus.textContent = "1px = " + ret.scale_mm_per_pixel + " mm";
+                    }
+                    _runEnforceRoomSizes(btn);
+                }).fail(function () {
+                    alert("Failed to set scale. Enforce Sizes cancelled.");
+                });
+                return;
+            }
+
+            _runEnforceRoomSizes(btn);
+        };
+
+        function _runEnforceRoomSizes(btn) {
+            btn.textContent = "Enforcing…";
+            btn.style.backgroundColor = "#616161";
+
+            $.get("/index/EnforceRoomSizes/", {}, function (r) {
+                CreateLeftPlan(r['roomret'], r['exterior'], r["door"], r["windows"], r["indoor"], r["windowsline"]);
+                btn.textContent = "Enforce Sizes";
+                btn.style.backgroundColor = "#4E342E";
+
+                // Build popup summary
+                var lines = ["<b>Room Size Enforcement Results</b><br><br>"];
+                var allMet = true;
+                (r['summary'] || []).forEach(function (s) {
+                    var icon = s.met ? "✔" : "✘";
+                    var changed = Math.abs(s.after_m2 - s.before_m2) > 0.05;
+                    var line = icon + " " + s.name + ": " +
+                               s.before_m2.toFixed(1) + "m²" +
+                               (changed ? " → " + s.after_m2.toFixed(1) + "m²" : " (no change)") +
+                               (s.met ? "" : " ⚠ could not meet minimum");
+                    lines.push(line + "<br>");
+                    if (!s.met) allMet = false;
+                });
+
+                if (allMet) lines.push("<br>All rooms meet minimum size requirements.");
+
+                // Warn about skipped refinement steps
+                var skipped = r['skipped_steps'] || [];
+                if (skipped.length > 0) {
+                    lines.push("<br><br>⚠ The following refinement steps have not been run yet:<br>");
+                    skipped.forEach(function (s) { lines.push("&nbsp;&nbsp;• " + s + "<br>"); });
+                    lines.push("<br>Results may change if you run refinement afterwards.");
+                    lines.push("<br><br><button onclick='_rerunRefinement()'>Rerun Refinement Now</button>");
+                }
+
+                var popup = document.createElement("div");
+                popup.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);" +
+                    "background:#fff;border:1px solid #ccc;border-radius:8px;padding:24px;z-index:9999;" +
+                    "max-width:400px;box-shadow:0 4px 20px rgba(0,0,0,0.3);font-size:13px;line-height:1.6;";
+                popup.innerHTML = lines.join("") +
+                    "<br><button onclick='this.parentElement.remove()' style='margin-top:12px;" +
+                    "background:#4E342E;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;'>Close</button>";
+                document.body.appendChild(popup);
+
+            }).fail(function (xhr) {
+                btn.textContent = "Enforce Sizes";
+                btn.style.backgroundColor = "#4E342E";
+                var resp = {};
+                try { resp = JSON.parse(xhr.responseText); } catch(e) {}
+                if (resp.error === 'no_scale') {
+                    alert("No scale is set. Please set a scale before enforcing room sizes.");
+                } else {
+                    alert("Enforce Sizes failed. Check server console for details.");
+                }
+            });
+        }
+
+        window._rerunRefinement = function () {
+            // Close any open popups
+            var popups = document.querySelectorAll("div[style*='position:fixed']");
+            popups.forEach(function(p) { p.remove(); });
+            // Trigger the full Run All pipeline
+            document.getElementById("runPipelineButton").click();
         };
 
         // Adjust Boundary button handler

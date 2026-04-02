@@ -61,6 +61,10 @@ current_scale = None         # float mm/px, set by SetScale view
 dxf_entries = []             # list of DXFEntry objects registered this session
 dxf_names   = []             # corresponding name strings
 
+# Refinement step tracking — reset on Generate, updated as each step runs
+_REFINEMENT_STEPS = ['AlignWalls', 'FillWallGaps', 'SnapRooms', 'FillLivingRoom', 'FixRooms']
+steps_run = set()            # set of step names completed since last Generate
+
 
 def _python_fallback_align(boundary, boxes, types, edges, threshold):
     """
@@ -1037,9 +1041,10 @@ def AdjustGraph(request):
     fp_end.data = add_dw_fp(fp_end.data)
 
     # Store for OptimizeLayout endpoint
-    global last_fp_data, last_testname
+    global last_fp_data, last_testname, steps_run
     last_fp_data = fp_end.data
     last_testname = testname
+    steps_run = set()   # reset refinement tracking on each Generate
     # Apply user-edited boundary so the optimizer and all subsequent steps use it
     if user_edited_boundary is not None and len(user_edited_boundary) == len(test_data_item.boundary):
         last_fp_data.boundary = user_edited_boundary
@@ -1290,7 +1295,7 @@ def ExpandLivingRoom(request):
 
 
 def AlignWalls(request):
-    global last_fp_data, last_testname
+    global last_fp_data, last_testname, steps_run
 
     if last_fp_data is None:
         return HttpResponse(
@@ -1363,6 +1368,7 @@ def AlignWalls(request):
         mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
         sio.savemat(mat_filename, {"data": last_fp_data})
 
+    steps_run.add('AlignWalls')
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
@@ -1448,7 +1454,7 @@ def AdjustBoundary(request):
 
 
 def FillWallGaps(request):
-    global last_fp_data, last_testname
+    global last_fp_data, last_testname, steps_run
 
     if last_fp_data is None:
         return HttpResponse(
@@ -1526,11 +1532,12 @@ def FillWallGaps(request):
         mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
         sio.savemat(mat_filename, {"data": last_fp_data})
 
+    steps_run.add('FillWallGaps')
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
 def SnapRooms(request):
-    global last_fp_data, last_testname
+    global last_fp_data, last_testname, steps_run
 
     if last_fp_data is None:
         return HttpResponse(
@@ -1608,11 +1615,12 @@ def SnapRooms(request):
         mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
         sio.savemat(mat_filename, {"data": last_fp_data})
 
+    steps_run.add('SnapRooms')
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
 def FillLivingRoom(request):
-    global last_fp_data, last_testname
+    global last_fp_data, last_testname, steps_run
 
     if last_fp_data is None:
         return HttpResponse(
@@ -1689,6 +1697,7 @@ def FillLivingRoom(request):
         mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
         sio.savemat(mat_filename, {"data": last_fp_data})
 
+    steps_run.add('FillLivingRoom')
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
@@ -2610,7 +2619,7 @@ def Log_Graph(request):
 
 
 def FixRooms(request):
-    global last_fp_data, last_testname
+    global last_fp_data, last_testname, steps_run
 
     if last_fp_data is None:
         return HttpResponse(
@@ -2692,12 +2701,106 @@ def FixRooms(request):
             mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
             sio.savemat(mat_filename, {"data": last_fp_data})
 
+        steps_run.add('FixRooms')
         return HttpResponse(json.dumps(data_js), content_type="application/json")
 
     except Exception as _e:
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(_e)}, status=500)
+
+
+def EnforceRoomSizes(request):
+    global last_fp_data, last_testname, current_scale, steps_run, _REFINEMENT_STEPS
+
+    if last_fp_data is None:
+        return JsonResponse({'error': 'No layout generated yet. Click Generate first.'}, status=400)
+
+    if current_scale is None:
+        return JsonResponse({'error': 'no_scale'}, status=400)
+
+    # Report which refinement steps have not been run yet
+    skipped = [s for s in _REFINEMENT_STEPS if s not in steps_run]
+
+    import sys as _sys, os as _os
+    _postprocess = _os.path.normpath(
+        _os.path.join(_os.path.dirname(__file__), '..', '..', 'PostProcess'))
+    if _postprocess not in _sys.path:
+        _sys.path.insert(0, _postprocess)
+    from optimizer.solver import enforce_room_sizes, boxes_to_boundaries  # type: ignore
+
+    print("[ENFORCE SIZES] Running room size enforcement...")
+    print(f"[ENFORCE SIZES] scale={current_scale:.4f} mm/px")
+    bnd = np.array(last_fp_data.boundary, dtype=float)
+    print(f"[ENFORCE SIZES] boundary pts={len(bnd)}  x=[{np.min(bnd[:,0]):.1f},{np.max(bnd[:,0]):.1f}]  y=[{np.min(bnd[:,1]):.1f},{np.max(bnd[:,1]):.1f}]")
+    for i, (box, rtype) in enumerate(zip(last_fp_data.newBox, last_fp_data.rType)):
+        b = [float(v) for v in box[:4]]
+        print(f"[ENFORCE SIZES]   room[{i}] type={int(rtype)}  box={[round(v,1) for v in b]}  px_area={(b[2]-b[0])*(b[3]-b[1]):.0f}")
+    corrected_boxes, summary = enforce_room_sizes(
+        last_fp_data.newBox,
+        last_fp_data.rType,
+        last_fp_data.boundary,
+        current_scale,
+    )
+    print("[ENFORCE SIZES] Done.")
+
+    last_fp_data.newBox    = corrected_boxes
+    last_fp_data.rBoundary = boxes_to_boundaries(corrected_boxes)
+    last_fp_data = add_dw_fp(last_fp_data)
+
+    external = np.asarray(last_fp_data.boundary)
+    xmin, xmax = np.min(external[:, 0]), np.max(external[:, 0])
+    ymin, ymax = np.min(external[:, 1]), np.max(external[:, 1])
+    area_ = float((ymax - ymin) * (xmax - xmin)) or 1.0
+
+    K = len(corrected_boxes)
+    entries = []
+    for i in range(K):
+        box = [float(v) for v in corrected_boxes[i]]
+        rtype = int(last_fp_data.rType[i])
+        room_name = mdul.room_label[rtype][1]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        entries.append((area, box, room_name, i))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    data_js = {}
+    data_js['roomret'] = [(box, [name], idx) for _, box, name, idx in entries]
+    data_js['rmsize']  = [
+        [[20 * math.sqrt(max(area, 0) / area_)], [name]]
+        for area, _, name, _ in entries
+    ]
+    data_js['rmpos'] = []
+
+    ex = " ".join(f"{pt[0]},{pt[1]}" for pt in external)
+    data_js['exterior'] = ex
+    data_js['door'] = (f"{external[0][0]},{external[0][1]},"
+                       f"{external[1][0]},{external[1][1]}")
+
+    data_js['indoor'] = []
+    for rb in last_fp_data.rBoundary:
+        if isinstance(rb, np.ndarray) and len(rb) > 0:
+            data_js['indoor'].append(" ".join(f"{x},{y}" for x, y in rb))
+
+    data_js['hsedge'] = last_fp_data.rEdge.astype(float).tolist()
+
+    data_js['windows']     = []
+    data_js['windowsline'] = []
+    for indx, x, y, w, h, r in last_fp_data.windows:
+        if w != 0:
+            data_js['windows'].append([x + 2, y - 2, w - 2, 4])
+            data_js['windowsline'].append([x + 2, y, w + x, y])
+        if h != 0:
+            data_js['windows'].append([x - 2, y, 4, h])
+            data_js['windowsline'].append([x, y, x, h + y])
+
+    data_js['summary'] = summary
+    data_js['skipped_steps'] = skipped
+
+    if last_testname:
+        mat_filename = "./static/" + last_testname.split(',')[0].split('.')[0] + ".mat"
+        sio.savemat(mat_filename, {"data": last_fp_data})
+
+    return HttpResponse(json.dumps(data_js), content_type="application/json")
 
 
 def SetScale(request):

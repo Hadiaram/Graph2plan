@@ -1531,3 +1531,202 @@ def fill_living_room(boxes, types, boundary):
     boxes[lr_idx][3] = by1
 
     return [np.array(b) for b in boxes]
+
+
+# ---------------------------------------------------------------------------
+# Room size enforcement (real-world scale aware)
+# ---------------------------------------------------------------------------
+
+# Type indices (must match room_label in utils.py)
+_TYPE_LIVING_ROOM = 0
+_TYPE_BATHROOM    = 3
+
+# Minimum sizes in metres
+_MIN_SIDE_BATHROOM = 3.0   # 3 x 3 m
+_MIN_SIDE_DEFAULT  = 5.0   # 5 x 5 m  (kitchen, bedroom, living room)
+_TOLERANCE_M2      = 1.0   # accept up to 1 m² under the minimum
+
+# Room types excluded from size enforcement (walls, doors, external, etc.)
+_EXCLUDED_TYPES = {9, 10, 11, 12, 13, 14, 15, 16, 17}
+
+
+def _clipped_area_m2(room_idx, boxes, scale_mm_per_px, bnd_shape, subtract_others=False):
+    """
+    Return the area of room `room_idx` clipped to `bnd_shape` (a Shapely polygon),
+    optionally subtracting overlapping rooms. Result is in m².
+    """
+    from shapely.geometry import box as _box
+
+    x0, y0, x1, y1 = boxes[room_idx][:4]
+    shape = _box(x0, y0, x1, y1)
+
+    try:
+        shape = shape.intersection(bnd_shape)
+    except Exception:
+        pass
+
+    if subtract_others:
+        for k in range(len(boxes)):
+            if k == room_idx:
+                continue
+            kx0, ky0, kx1, ky1 = boxes[k][:4]
+            try:
+                shape = shape.difference(_box(kx0, ky0, kx1, ky1))
+            except Exception:
+                pass
+
+    return max(0.0, shape.area) * (scale_mm_per_px / 1000.0) ** 2
+
+
+def _visible_area_m2(lr_idx, boxes, scale_mm_per_px, boundary=None):
+    """
+    Return the visible area of the living room in m²:
+    LR box clipped to the boundary polygon, minus other rooms.
+    """
+    from shapely.geometry import Polygon as _Poly, box as _box
+
+    lx0, ly0, lx1, ly1 = boxes[lr_idx][:4]
+    lr_shape = _box(lx0, ly0, lx1, ly1)
+
+    if boundary is not None:
+        try:
+            bnd_xy = np.array(boundary, dtype=float)[:, :2]   # extract x, y only
+            bnd_shape = _Poly(bnd_xy)
+            if bnd_shape.is_valid:
+                lr_shape = lr_shape.intersection(bnd_shape)
+        except Exception:
+            pass
+
+    for k in range(len(boxes)):
+        if k == lr_idx:
+            continue
+        kx0, ky0, kx1, ky1 = boxes[k][:4]
+        try:
+            lr_shape = lr_shape.difference(_box(kx0, ky0, kx1, ky1))
+        except Exception:
+            pass
+
+    return max(0.0, lr_shape.area) * (scale_mm_per_px / 1000.0) ** 2
+
+
+def _room_min_side_m(rtype):
+    return _MIN_SIDE_BATHROOM if int(rtype) == _TYPE_BATHROOM else _MIN_SIDE_DEFAULT
+
+
+def _expand_room_to_min(idx, boxes, boundary_box, scale_mm_per_px, rtype):
+    """
+    Attempt to expand room `idx` to meet its minimum side length in metres.
+    Expands symmetrically within the boundary bounding box.
+    Returns True if the minimum area is now met (within tolerance).
+    """
+    mm = scale_mm_per_px
+    min_side_m = _room_min_side_m(rtype)
+    min_px = (min_side_m * 1000.0) / mm
+
+    bx0, by0, bx1, by1 = boundary_box
+    x0, y0, x1, y1 = [float(v) for v in boxes[idx][:4]]
+
+    w = x1 - x0
+    if w < min_px:
+        deficit = min_px - w
+        expand_left  = min(deficit / 2.0, x0 - bx0)
+        expand_right = min(deficit - expand_left, bx1 - x1)
+        expand_left  = min(deficit - expand_right, x0 - bx0)
+        x0 -= expand_left
+        x1 += expand_right
+
+    h = y1 - y0
+    if h < min_px:
+        deficit = min_px - h
+        expand_top    = min(deficit / 2.0, y0 - by0)
+        expand_bottom = min(deficit - expand_top, by1 - y1)
+        expand_top    = min(deficit - expand_bottom, y0 - by0)
+        y0 -= expand_top
+        y1 += expand_bottom
+
+    boxes[idx][0] = x0
+    boxes[idx][1] = y0
+    boxes[idx][2] = x1
+    boxes[idx][3] = y1
+
+    actual_area_m2 = (x1 - x0) * (y1 - y0) * (mm / 1000.0) ** 2
+    return actual_area_m2 >= (min_side_m ** 2 - _TOLERANCE_M2)
+
+
+def enforce_room_sizes(boxes, types, boundary, scale_mm_per_px):
+    """
+    Enforce minimum real-world room sizes.
+
+    Parameters
+    ----------
+    boxes           : list of array-like [x0, y0, x1, y1]
+    types           : list of int  (room type indices)
+    boundary        : list of [x, y] boundary polygon vertices
+    scale_mm_per_px : float — millimetres per pixel
+
+    Returns
+    -------
+    corrected_boxes : list of np.ndarray
+    summary         : list of dicts  {name, before_m2, after_m2, met, was_lr}
+    """
+    from shapely.geometry import Polygon as _Poly
+
+    boxes = [list(map(float, b[:4])) for b in boxes]
+    types = list(types)
+    mm    = float(scale_mm_per_px)
+
+    boundary_arr = np.array(boundary, dtype=float)
+    boundary_box = (
+        float(np.min(boundary_arr[:, 0])),
+        float(np.min(boundary_arr[:, 1])),
+        float(np.max(boundary_arr[:, 0])),
+        float(np.max(boundary_arr[:, 1])),
+    )
+
+    try:
+        bnd_xy = np.array(boundary, dtype=float)[:, :2]   # extract x, y only
+        bnd_shape = _Poly(bnd_xy)
+        if not bnd_shape.is_valid:
+            bnd_shape = bnd_shape.buffer(0)
+    except Exception:
+        bnd_shape = None
+
+    _names = {0: 'LivingRoom', 1: 'MasterRoom', 2: 'Kitchen', 3: 'Bathroom',
+              4: 'DiningRoom', 5: 'ChildRoom',   6: 'StudyRoom', 7: 'SecondRoom',
+              8: 'GuestRoom'}
+
+    summary = []
+
+    # Pass 1: all rooms except living room — use boundary-clipped area
+    for i in range(len(boxes)):
+        rtype = int(types[i])
+        if rtype == _TYPE_LIVING_ROOM or rtype in _EXCLUDED_TYPES:
+            continue
+
+        before_m2 = _clipped_area_m2(i, boxes, mm, bnd_shape) if bnd_shape else \
+                    (boxes[i][2] - boxes[i][0]) * (boxes[i][3] - boxes[i][1]) * (mm / 1000.0) ** 2
+        met = _expand_room_to_min(i, boxes, boundary_box, mm, rtype)
+        after_m2 = _clipped_area_m2(i, boxes, mm, bnd_shape) if bnd_shape else \
+                   (boxes[i][2] - boxes[i][0]) * (boxes[i][3] - boxes[i][1]) * (mm / 1000.0) ** 2
+
+        name = _names.get(rtype, f'Room{rtype}')
+        summary.append({'name': name, 'before_m2': round(before_m2, 2),
+                        'after_m2': round(after_m2, 2), 'met': met, 'was_lr': False})
+        print(f"[ENFORCE] {name}: {before_m2:.1f}m² → {after_m2:.1f}m²  met={met}")
+
+    # Pass 2: living room — clipped to boundary, minus other rooms
+    for i in range(len(boxes)):
+        rtype = int(types[i])
+        if rtype != _TYPE_LIVING_ROOM:
+            continue
+
+        before_m2 = _visible_area_m2(i, boxes, mm, boundary)
+        _expand_room_to_min(i, boxes, boundary_box, mm, rtype)
+        after_m2  = _visible_area_m2(i, boxes, mm, boundary)
+        met = after_m2 >= (_MIN_SIDE_DEFAULT ** 2 - _TOLERANCE_M2)
+
+        summary.append({'name': 'LivingRoom', 'before_m2': round(before_m2, 2),
+                        'after_m2': round(after_m2, 2), 'met': met, 'was_lr': True})
+        print(f"[ENFORCE] LivingRoom (visible): {before_m2:.1f}m² → {after_m2:.1f}m²  met={met}")
+
+    return [np.array(b[:4]) for b in boxes], summary

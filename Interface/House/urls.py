@@ -51,6 +51,7 @@ urlpatterns = [
     path('index/AdjustBoundary/', views.AdjustBoundary),
     path('index/UpdateBoundary/', views.UpdateBoundary),
     path('index/SetScale/', views.SetScale),
+    path('index/EnforceRoomSizes/', views.EnforceRoomSizes),
     path('index/ParseDXFBoundary/', views.ParseDXFBoundary),
     path('index/RegisterDXFBoundary/', views.RegisterDXFBoundary),
 

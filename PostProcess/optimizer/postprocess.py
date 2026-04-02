@@ -48,6 +48,7 @@ MIN_DOOR_PX = 30
 # Types that represent "open / structural" elements and should not be treated
 # as room blockers when checking connectivity to the LivingRoom.
 _OPEN_TYPES = {0, 13, 14, 15}   # LivingRoom, External, ExteriorWall, FrontDoor
+_BATHROOM_TYPE = 3
 
 
 def _room_label(i, types):
@@ -290,6 +291,60 @@ def _try_slide_to_boundary(boxes, r, K, types, bnd_arr, min_door, **_kwargs):
     return True
 
 
+def _relocate_bathroom_to_far_corner(boxes, bath_idx, bedroom_idx, open_side, K, types):
+    """
+    Move an en suite bathroom to the corner of the bedroom on the wall OPPOSITE
+    the LR-facing side, so it stops blocking the LR connection.
+
+    open_side: side of the bedroom being opened to LR (0=left,1=top,2=right,3=bottom).
+    Tries both corners on the far wall and picks the one that overlaps fewest other rooms.
+    Returns True always (relocation is always applied).
+    """
+    rx0, ry0, rx1, ry1 = [float(v) for v in boxes[bedroom_idx]]
+    bw = float(boxes[bath_idx][2] - boxes[bath_idx][0])
+    bh = float(boxes[bath_idx][3] - boxes[bath_idx][1])
+
+    # Clamp bathroom to fit within bedroom dimensions
+    bw = min(bw, rx1 - rx0)
+    bh = min(bh, ry1 - ry0)
+
+    # Two candidate corners on the far wall (opposite the side being opened)
+    if open_side == 0:    # opening left  → far wall is right
+        c1 = (rx1 - bw, ry0,      rx1, ry0 + bh)   # top-right corner
+        c2 = (rx1 - bw, ry1 - bh, rx1, ry1)         # bottom-right corner
+    elif open_side == 2:  # opening right → far wall is left
+        c1 = (rx0,      ry0,      rx0 + bw, ry0 + bh)  # top-left corner
+        c2 = (rx0,      ry1 - bh, rx0 + bw, ry1)        # bottom-left corner
+    elif open_side == 1:  # opening top   → far wall is bottom
+        c1 = (rx0,      ry1 - bh, rx0 + bw, ry1)        # bottom-left corner
+        c2 = (rx1 - bw, ry1 - bh, rx1,      ry1)         # bottom-right corner
+    else:                 # opening bottom → far wall is top
+        c1 = (rx0,      ry0, rx0 + bw, ry0 + bh)        # top-left corner
+        c2 = (rx1 - bw, ry0, rx1,      ry0 + bh)         # top-right corner
+
+    def _overlap_count(cx0, cy0, cx1, cy1):
+        count = 0
+        for k in range(K):
+            if k in (bath_idx, bedroom_idx):
+                continue
+            kx0, ky0, kx1, ky1 = boxes[k]
+            if min(cx1, kx1) - max(cx0, kx0) > 0 and min(cy1, ky1) - max(cy0, ky0) > 0:
+                count += 1
+        return count
+
+    o1, o2 = _overlap_count(*c1), _overlap_count(*c2)
+    chosen = c1 if o1 <= o2 else c2
+
+    boxes[bath_idx][0] = chosen[0]
+    boxes[bath_idx][1] = chosen[1]
+    boxes[bath_idx][2] = chosen[2]
+    boxes[bath_idx][3] = chosen[3]
+    print(f"[FIX ROOMS]   Relocated {_room_label(bath_idx, types)} to far corner "
+          f"({chosen[0]:.0f},{chosen[1]:.0f})-({chosen[2]:.0f},{chosen[3]:.0f}) "
+          f"[overlaps: {min(o1, o2)}]")
+    return True
+
+
 def _fix_lr_edge(boxes, r, K, types, bnd, min_door):
     """
     Ensure room r has at least min_door px of free interior wall opening onto
@@ -454,7 +509,8 @@ def _fix_lr_edge(boxes, r, K, types, bnd, min_door):
                 return
             continue
 
-        # Try shrinking blockers one at a time (biggest first) until sufficient
+        # Try fixing blockers one at a time until sufficient opening is achieved.
+        # Bathrooms are relocated to the far corner of the bedroom rather than shrunk.
         remaining_blockers = list(blockers_c)
         max_attempts = len(remaining_blockers)
         for _ in range(max_attempts):
@@ -468,6 +524,11 @@ def _fix_lr_edge(boxes, r, K, types, bnd, min_door):
             current_blockers = live.get(side_candidate, remaining_blockers)
             if not current_blockers:
                 break
+            # Relocate bathrooms instead of shrinking them
+            bath_blockers = [k for k in current_blockers if int(types[k]) == _BATHROOM_TYPE]
+            if bath_blockers:
+                _relocate_bathroom_to_far_corner(boxes, bath_blockers[0], r, side_candidate, K, types)
+                continue
             applied = _shrink_one_blocker(side_candidate, current_blockers)
             if not applied:
                 break  # can't shrink further on this side

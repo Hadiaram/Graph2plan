@@ -45,6 +45,8 @@ class Model(nn.Module):
               roi_output_size = (8,8),
               roi_spatial_scale = 1.0/8.0,
               roi_cat_feature = True,
+              # star-rating conditioning (None = disabled, 2 = {4-star, 5-star})
+              num_star_ratings = None,
               # others
               mlp_activation='leakyrelu',
               mlp_normalization='none',
@@ -65,6 +67,7 @@ class Model(nn.Module):
     
     self.obj_embeddings = nn.Embedding(num_objs, embedding_dim)
     self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
+    self.star_rating_embeddings = nn.Embedding(num_star_ratings, embedding_dim) if num_star_ratings else None
     self.image_size = image_size
     self.feature_dim = embedding_dim+attribute_dim
 
@@ -136,17 +139,18 @@ class Model(nn.Module):
       )
 
   def forward(
-    self, 
-    objs, 
-    triples, 
+    self,
+    objs,
+    triples,
     boundary,
     obj_to_img=None,
     attributes=None,
-    boxes_gt=None, 
+    boxes_gt=None,
     generate=False,
     refine=False,
     relative=False,
-    inside_box=None
+    inside_box=None,
+    star_ratings=None,
     ):
     """
     Required Inputs:
@@ -198,6 +202,13 @@ class Model(nn.Module):
     
     print(f"         → Step 1: Embedding objects and predicates...")
     obj_vecs = self.obj_embeddings(objs)
+
+    # Star-rating conditioning: add per-image rating embedding to every room embedding
+    if star_ratings is not None and self.star_rating_embeddings is not None:
+      star_vecs = self.star_rating_embeddings(star_ratings)  # (B, embedding_dim)
+      obj_vecs = obj_vecs + star_vecs[obj_to_img]            # (O, embedding_dim)
+      print(f"            star_ratings: {star_ratings.tolist()} → conditioning applied")
+
     pred_vecs = self.pred_embeddings(p)
     print(f"            obj_vecs: {obj_vecs.shape}, pred_vecs: {pred_vecs.shape}")
 

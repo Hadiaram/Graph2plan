@@ -16,6 +16,72 @@ var rightDeleteMode = false; // Track delete mode for right-side interface
 var deletedRightRooms = []; // Track deleted room IDs
 var measureMode = false;       // Pixel ruler: active when true
 var measurePoint1 = null;      // First clicked point {x, y} in SVG coords
+
+// Building mode — read from the value set by Django on the body element
+var currentBuildingMode = document.body.getAttribute('data-building-mode') || 'residential';
+var currentStarRating = parseInt(
+    (document.getElementById('starRatingBar') || {}).getAttribute('data-star-rating') || '4', 10
+);
+
+function setBuildingMode(mode) {
+    if (mode === currentBuildingMode) return;
+    $.ajax({
+        url: '/index/SetBuildingMode/',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ mode: mode }),
+        success: function(resp) {
+            currentBuildingMode = resp.mode;
+            document.body.setAttribute('data-building-mode', currentBuildingMode);
+
+            // Update mode toggle button styles
+            var isHotel = currentBuildingMode === 'hotel';
+            document.getElementById('modeBtn_residential').style.backgroundColor = isHotel ? '#e0e0e0' : '#1565C0';
+            document.getElementById('modeBtn_residential').style.color           = isHotel ? '#555'    : '#fff';
+            document.getElementById('modeBtn_hotel').style.backgroundColor       = isHotel ? '#1565C0' : '#e0e0e0';
+            document.getElementById('modeBtn_hotel').style.color                 = isHotel ? '#fff'    : '#555';
+            document.getElementById('hotelComingSoonLabel').style.display        = isHotel ? 'inline'  : 'none';
+
+            // Show/hide the star-rating sub-toggle
+            document.getElementById('starRatingBar').style.display = isHotel ? 'flex' : 'none';
+
+            // Re-initialise data and model for the new mode
+            $.get("/index/Init/", { start: "1" }, function() {
+                console.log("[Mode] Switched to " + currentBuildingMode + " | model_ready=" + resp.model_ready);
+            });
+        },
+        error: function(xhr) {
+            console.error("[Mode] SetBuildingMode failed:", xhr.responseText);
+        }
+    });
+}
+
+function setStarRating(rating) {
+    if (rating === currentStarRating) return;
+    $.ajax({
+        url: '/index/SetStarRating/',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ rating: rating }),
+        success: function(resp) {
+            currentStarRating = resp.star_rating;
+            document.getElementById('starRatingBar').setAttribute('data-star-rating', currentStarRating);
+
+            // Update star button styles
+            var is5Star = currentStarRating === 5;
+            document.getElementById('starBtn_4').style.backgroundColor = is5Star ? '#e0e0e0' : '#E65100';
+            document.getElementById('starBtn_4').style.color           = is5Star ? '#555'    : '#fff';
+            document.getElementById('starBtn_5').style.backgroundColor = is5Star ? '#E65100' : '#e0e0e0';
+            document.getElementById('starBtn_5').style.color           = is5Star ? '#fff'    : '#555';
+
+            console.log("[StarRating] Set to " + currentStarRating + "-star");
+        },
+        error: function(xhr) {
+            console.error("[StarRating] SetStarRating failed:", xhr.responseText);
+        }
+    });
+}
+
 $(document).ready(function () {
     start();//执行函数
     isTrans = 0;

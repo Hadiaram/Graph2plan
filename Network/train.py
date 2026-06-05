@@ -53,6 +53,8 @@ def parse_args():
     # architecture
     parser.add_argument('--gene_layout', default='1', type=bool_flag)
     parser.add_argument('--box_refine', default='1', type=bool_flag)
+    # star-rating conditioning (None for residential, 2 for hotel {4-star, 5-star})
+    parser.add_argument('--num_star_ratings', default=None, type=int)
     # input
     parser.add_argument('--embedding_dim', default=128,type=int)
     # refine
@@ -113,9 +115,10 @@ def get_model(args):
     image_size=args.image_size,
     input_dim = args.input_dim,
     attribute_dim=args.pos_dim+args.area_dim,
-    refinement_dims=args.refinement_dims if args.gene_layout else None,    
+    refinement_dims=args.refinement_dims if args.gene_layout else None,
     box_refine_arch=args.box_refine_arch if args.box_refine else None,
-    roi_cat_feature=args.roi_cat_feature)
+    roi_cat_feature=args.roi_cat_feature,
+    num_star_ratings=args.num_star_ratings)
 
 def get_dataset(args,split='valid'):
     return FloorPlanDataset(f'{args.dataset_dir}/data_{split}.mat')
@@ -305,10 +308,10 @@ def main(args):
         
         optimizer.zero_grad()
         
-        boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
+        boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,star_ratings,obj_to_img,triple_to_img,name = batch_cuda(batch)
 
         if args.relative: boxes = box_rel2abs(boxes,inside_box,obj_to_img)
-        
+
         # CRITICAL: Check input data for NaN/Inf before model forward
         iteration = engine.state.iteration
         has_bad_input = False
@@ -316,22 +319,23 @@ def main(args):
         has_bad_input |= check_tensor_for_nan(inside_box, "inside_box", epoch, iteration)
         has_bad_input |= check_tensor_for_nan(boxes, "boxes", epoch, iteration)
         has_bad_input |= check_tensor_for_nan(attrs, "attrs", epoch, iteration)
-        
+
         if has_bad_input:
             logging.error(f"Skipping batch due to bad input data")
             return {'total_loss': 0.0}
 
         model_out = model(
-            objs, 
-            triples, 
+            objs,
+            triples,
             boundary,
             obj_to_img = obj_to_img,
             attributes=attrs,
-            boxes_gt= boxes if args.gt_box else None, 
+            boxes_gt= boxes if args.gt_box else None,
             generate = args.gene_layout,  # Generate from epoch 1 for gradual training
             refine = args.box_refine and engine.state.epoch>2,
             relative = args.relative,
             inside_box=inside_box if args.relative else None,
+            star_ratings=star_ratings if args.num_star_ratings else None,
         )
         boxes_pred, gene_layout, boxes_refine = model_out
         
@@ -473,7 +477,7 @@ def main(args):
     def inference(engine,batch):
         model.eval()
         with torch.no_grad():
-            boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
+            boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,star_ratings,obj_to_img,triple_to_img,name = batch_cuda(batch)
 
             # CRITICAL: Validate room indices in validation data
             if (objs >= 5).any() or (objs < 0).any():
@@ -493,19 +497,20 @@ def main(args):
             if args.relative: boxes = box_rel2abs(boxes,inside_box,obj_to_img)
 
             model_out = model(
-                objs, 
-                triples, 
+                objs,
+                triples,
                 boundary,
                 obj_to_img = obj_to_img,
                 attributes=attrs,
-                boxes_gt= boxes if args.gt_box else None, 
+                boxes_gt= boxes if args.gt_box else None,
                 generate = args.gene_layout,
                 refine = args.box_refine,
                 relative = args.relative,
                 inside_box=inside_box if args.relative else None,
+                star_ratings=star_ratings if args.num_star_ratings else None,
             )
             boxes_pred, gene_layout, boxes_refine = model_out
-            
+
             # Initialize total_loss as None, will be set to first valid loss
             total_loss = None
             loss_items = {}
@@ -727,7 +732,7 @@ def main(args):
     def test(engine,batch):
         model.eval()
         with torch.no_grad():
-            boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,obj_to_img,triple_to_img,name = batch_cuda(batch)
+            boundary,inside_box,objs,attrs,triples,layout,boxes,inside_coords,star_ratings,obj_to_img,triple_to_img,name = batch_cuda(batch)
 
             # CRITICAL: Log room indices to diagnose out-of-bounds issue
             if (objs >= 5).any() or (objs < 0).any():
@@ -748,16 +753,17 @@ def main(args):
                 layout = torch.clamp(layout, 0, 5)
 
             model_out = model(
-                objs, 
-                triples, 
+                objs,
+                triples,
                 boundary,
                 obj_to_img = obj_to_img,
                 attributes=attrs,
-                boxes_gt= boxes if args.gt_box else None, 
+                boxes_gt= boxes if args.gt_box else None,
                 generate = args.gene_layout,
                 refine = args.box_refine,
                 relative = args.relative,
                 inside_box=inside_box if args.relative else None,
+                star_ratings=star_ratings if args.num_star_ratings else None,
             )
             boxes_pred, gene_layout, boxes_refine = model_out
 

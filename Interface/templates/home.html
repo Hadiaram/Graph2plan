@@ -47,7 +47,7 @@
 
 </head>
 
-<body onselectstart="return false" class="cancelselect" style="background: white;">
+<body onselectstart="return false" class="cancelselect" style="background: white;" data-building-mode="{{ building_mode }}">
 
 <!-- start: Header -->
 
@@ -79,6 +79,47 @@
             <link rel="stylesheet" href="../static/select/element.min.css">
 
             <link rel="stylesheet" href="../static/select/style.css">
+
+            <!-- Building mode toggle -->
+            <div id="buildingModeBar" style="margin-top: 1%; margin-left: 4%; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 13px; color: #555; font-weight: 600;">Mode:</span>
+                <div id="modeBtn_residential"
+                     onclick="setBuildingMode('residential')"
+                     style="cursor:pointer; padding: 4px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+                            background-color: {% if building_mode == 'residential' %}#1565C0{% else %}#e0e0e0{% endif %};
+                            color: {% if building_mode == 'residential' %}#fff{% else %}#555{% endif %};">
+                    Residential
+                </div>
+                <div id="modeBtn_hotel"
+                     onclick="setBuildingMode('hotel')"
+                     style="cursor:pointer; padding: 4px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+                            background-color: {% if building_mode == 'hotel' %}#1565C0{% else %}#e0e0e0{% endif %};
+                            color: {% if building_mode == 'hotel' %}#fff{% else %}#555{% endif %};">
+                    Hotel
+                </div>
+                <span id="hotelComingSoonLabel"
+                      style="font-size: 12px; color: #e65100; display: {% if building_mode == 'hotel' %}inline{% else %}none{% endif %};">
+                    &#9888; AI model not yet trained &mdash; generation unavailable
+                </span>
+            </div>
+
+            <!-- Star-rating sub-toggle (hotel mode only) -->
+            <div id="starRatingBar" style="margin-left: 4%; margin-bottom: 10px; display: {% if building_mode == 'hotel' %}flex{% else %}none{% endif %}; align-items: center; gap: 8px;"
+                 data-star-rating="{{ hotel_star_rating }}">
+                <span style="font-size: 12px; color: #555; font-weight: 600; margin-left: 38px;">Star:</span>
+                <div id="starBtn_4" onclick="setStarRating(4)"
+                     style="cursor:pointer; padding: 3px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+                            background-color: {% if hotel_star_rating == 4 %}#E65100{% else %}#e0e0e0{% endif %};
+                            color: {% if hotel_star_rating == 4 %}#fff{% else %}#555{% endif %};">
+                    4-Star
+                </div>
+                <div id="starBtn_5" onclick="setStarRating(5)"
+                     style="cursor:pointer; padding: 3px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+                            background-color: {% if hotel_star_rating == 5 %}#E65100{% else %}#e0e0e0{% endif %};
+                            color: {% if hotel_star_rating == 5 %}#fff{% else %}#555{% endif %};">
+                    5-Star
+                </div>
+            </div>
 
             <div style=" z-index: 99;    margin-top: 2%; margin-left: 4%;">
                 <div id="BedRoomVue" style="z-index:1001;width: 291px;position: absolute;">

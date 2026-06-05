@@ -44,31 +44,34 @@ def get_data(fp):
     print(f"      → Moved all tensors to {DEVICE}")
     return batch
 
-def test(model,fp):
+def test(model, fp, star_rating=None):
     print(f"\n   🧪 [TEST] test(): Running model inference")
     with torch.no_grad():
         batch = get_data(fp)
         boundary,inside_box,rooms,attrs,triples = batch
-        
+
         print(f"   🔮 [TEST] Calling model forward pass...")
         print(f"      → rooms: {rooms.shape}")
         print(f"      → triples: {triples.shape}")
         print(f"      → boundary: {boundary.shape}")
         print(f"      → attrs: {attrs.shape}")
         print(f"      → inside_box: {inside_box.shape}")
-        
+        if star_rating is not None:
+            print(f"      → star_rating: {star_rating.tolist()}")
+
         try:
             model_out = model(
-                rooms, 
-                triples, 
+                rooms,
+                triples,
                 boundary,
                 obj_to_img = None,
                 attributes = attrs,
-                boxes_gt= None, 
+                boxes_gt= None,
                 generate = True,
                 refine = True,
                 relative = True,
-                inside_box=inside_box
+                inside_box=inside_box,
+                star_ratings=star_rating,
             )
             print(f"   ✅ [TEST] Model forward pass completed")
         except Exception as ex:
@@ -111,19 +114,16 @@ def test(model,fp):
 
         return boxes_pred.squeeze().cpu().numpy(),gene_preds.squeeze().cpu().double().numpy(),boxes_refine.squeeze().cpu().numpy()
 
-def load_model():
+def load_model(model_path='./model/model.pth', num_star_ratings=None):
+    model = Model(num_star_ratings=num_star_ratings)
 
-    model = Model()
-    
-    # Load model with appropriate device mapping first, then move to device
     if torch.cuda.is_available():
         model.load_state_dict(
-            torch.load('./model/model.pth', map_location={'cuda:0': 'cuda:0'}))
+            torch.load(model_path, map_location={'cuda:0': 'cuda:0'}))
         model.to(DEVICE)
     else:
         model.load_state_dict(
-            torch.load('./model/model.pth', map_location='cpu'))
-        # Don't need to move to device since model is already on CPU
+            torch.load(model_path, map_location='cpu'))
 
     model.eval()
     return model
@@ -298,8 +298,15 @@ def get_userinfo_adjust(userRoomID,adptRoomID,NewGraph):
     vw.loadModel()
     print(f"      → Model loaded, vw.model type: {type(vw.model)}")
     print(f"      → Model is on device: {next(vw.model.parameters()).device if hasattr(vw.model, 'parameters') else 'unknown'}")
-    
-    boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end)
+
+    # Build star_rating tensor for hotel mode; None for residential
+    star_rating = None
+    if getattr(vw, 'building_mode', 'residential') == 'hotel':
+        star_idx = vw._STAR_RATING_TO_IDX.get(getattr(vw, 'hotel_star_rating', 4), 0)
+        star_rating = torch.tensor([star_idx], dtype=torch.long).to(DEVICE)
+        print(f"      → hotel star_rating index: {star_idx} (star={getattr(vw, 'hotel_star_rating', 4)})")
+
+    boxes_pred, gene_layout, boxes_refeine = test(vw.model, fp_end, star_rating=star_rating)
 
     e=time.perf_counter()
     print(f'\n   ⏱️ [TEST] Model inference time: {e - s:.3f} seconds')

@@ -56,6 +56,9 @@ urlpatterns = [
     path('index/RegisterDXFBoundary/', views.RegisterDXFBoundary),
 
 
+    path('index/SetBuildingMode/', views.SetBuildingMode),
+    path('index/SetStarRating/', views.SetStarRating),
+
     path('home', views.home),
 
 

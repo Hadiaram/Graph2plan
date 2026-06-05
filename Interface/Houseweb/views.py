@@ -1,6 +1,7 @@
 from django.shortcuts import render # type: ignore
 from django.http import HttpResponse, JsonResponse # type: ignore
 from django.conf import settings # type: ignore
+from django.views.decorators.csrf import csrf_exempt # type: ignore
 import json
 import os
 import random
@@ -50,6 +51,41 @@ global last_fp_data, last_testname
 global user_edited_boundary  # boundary edited by user via drag before/after Generate
 global current_scale          # mm per pixel; None = unscaled (pixel coords)
 global dxf_entries, dxf_names  # DXF-uploaded boundaries, preserved across getTestData reloads
+global building_mode          # 'residential' or 'hotel'
+global hotel_star_rating      # 4 or 5 (only relevant in hotel mode)
+
+building_mode = 'residential'
+hotel_star_rating = 4
+
+# Maps hotel star rating value → contiguous model index
+_STAR_RATING_TO_IDX = {4: 0, 5: 1}
+
+# Data and model paths per building mode.
+# Hotel paths point to files that don't exist yet — handled gracefully at load time.
+_MODE_PATHS = {
+    'residential': {
+        'model':           './model/model.pth',
+        'num_star_ratings': None,
+        'test_data':  r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_converted.pkl',
+        'train_data': r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_converted.pkl',
+        'eNum':       r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_eNum.pkl',
+        'rNum':       r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\rNum_train.npy',
+        'tf_train':   r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\tf_train.npy',
+        'centroids':  r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\centroids_train.npy',
+        'clusters':   r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\clusters_train.npy',
+    },
+    'hotel': {
+        'model':           './model/model_hotel.pth',
+        'num_star_ratings': 2,   # index 0 = 4-star, index 1 = 5-star
+        'test_data':  r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_hotel.pkl',
+        'train_data': r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_hotel.pkl',
+        'eNum':       r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_eNum_hotel.pkl',
+        'rNum':       r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\rNum_train_hotel.npy',
+        'tf_train':   r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\tf_train_hotel.npy',
+        'centroids':  r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\centroids_hotel.npy',
+        'clusters':   r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\clusters_hotel.npy',
+    },
+}
 
 # Initialize module-level variables
 boxes_pred = None
@@ -171,7 +207,10 @@ def _python_fallback_align(boundary, boxes, types, edges, threshold):
 
 
 def home(request):
-    return render(request, "home.html", )
+    return render(request, "home.html", {
+        'building_mode': building_mode,
+        'hotel_star_rating': hotel_star_rating,
+    })
 
 
 def Init(request):
@@ -185,6 +224,40 @@ def Init(request):
     print('Init(model+test+train+engine+retrieval) time: %s Seconds' % (end - start))
 
     return HttpResponse(None)
+
+
+@csrf_exempt
+def SetStarRating(request):
+    global hotel_star_rating
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    data = json.loads(request.body)
+    rating = data.get('rating', 4)
+    if rating not in _STAR_RATING_TO_IDX:
+        return JsonResponse({'error': f'Unknown star rating: {rating}'}, status=400)
+    hotel_star_rating = rating
+    print(f'[SetStarRating] hotel_star_rating set to {hotel_star_rating}')
+    return JsonResponse({'star_rating': hotel_star_rating})
+
+
+@csrf_exempt
+def SetBuildingMode(request):
+    global building_mode
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    data = json.loads(request.body)
+    mode = data.get('mode', '')
+    if mode not in _MODE_PATHS:
+        return JsonResponse({'error': f'Unknown mode: {mode}'}, status=400)
+    building_mode = mode
+    getTestData()
+    getTrainData()
+    loadModel()
+    loadRetrieval()
+    model_ready = model is not None
+    data_ready = len(test_data) > 0
+    print(f'[SetBuildingMode] switched to {mode} | model_ready={model_ready} | data_ready={data_ready}')
+    return JsonResponse({'mode': building_mode, 'model_ready': model_ready, 'data_ready': data_ready})
 
 
 def loadMatlabEng():
@@ -209,24 +282,33 @@ def loadMatlabEng():
 def loadRetrieval():
     global tf_train, centroids, clusters
     t1 = time.perf_counter()
-    tf_train = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\tf_train.npy')
-    centroids = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\centroids_train.npy')
-    clusters = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\retrieval\clusters_train.npy')
-    t2 = time.perf_counter()
-    print('load tf/centroids/clusters', t2 - t1)
+    paths = _MODE_PATHS[building_mode]
+    try:
+        tf_train = np.load(paths['tf_train'])
+        centroids = np.load(paths['centroids'])
+        clusters = np.load(paths['clusters'])
+        print(f'load tf/centroids/clusters ({building_mode})', time.perf_counter() - t1)
+    except FileNotFoundError as e:
+        tf_train = centroids = clusters = None
+        print(f'[loadRetrieval] {building_mode} retrieval data not found: {e}')
 
 
 def getTestData():
     start = time.perf_counter()
     global test_data, testNameList, trainNameList, dxf_entries, dxf_names
 
-    test_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_test_converted.pkl', 'rb'))
-    # Strip trailing spaces from name lists to match image filenames
-    test_data, testNameList, trainNameList = (
-        list(test_data['data']),
-        [str(n).strip() for n in test_data['testNameList']],
-        [str(n).strip() for n in test_data['trainNameList']]
-    )
+    paths = _MODE_PATHS[building_mode]
+    try:
+        raw = pickle.load(open(paths['test_data'], 'rb'))
+        test_data, testNameList, trainNameList = (
+            list(raw['data']),
+            [str(n).strip() for n in raw['testNameList']],
+            [str(n).strip() for n in raw['trainNameList']]
+        )
+    except FileNotFoundError:
+        test_data, testNameList, trainNameList = [], [], []
+        print(f'[getTestData] {building_mode} test data not found — skipping')
+        return
 
     # Re-append any DXF-registered entries so they survive reloads
     if dxf_entries:
@@ -236,10 +318,8 @@ def getTestData():
                 testNameList.append(name)
         print(f"📊 Re-appended {len(dxf_entries)} DXF boundary entries")
 
-    print(f"📊 Loaded {len(test_data)} test floor plans")
+    print(f"📊 Loaded {len(test_data)} test floor plans ({building_mode})")
     print(f"📊 testNameList has {len(testNameList)} names: {testNameList[:10]}")
-    print(f"📊 trainNameList has {len(trainNameList)} names: {trainNameList[:10]}")
-
     end = time.perf_counter()
     print('getTestData time: %s Seconds' % (end - start))
 
@@ -247,24 +327,32 @@ def getTestData():
 def getTrainData():
     start = time.perf_counter()
     global train_data, trainNameList, trainTF, train_data_eNum, train_data_rNum
-    
-    train_data = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_converted.pkl', 'rb'))
-    train_data, trainNameList, trainTF = train_data['data'], list(train_data['nameList']), list(train_data['trainTF'])
-    
-    train_data_eNum = pickle.load(open(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\data_train_eNum.pkl', 'rb'))
-    train_data_eNum = train_data_eNum['eNum']
-    train_data_rNum = np.load(r'C:\Users\hmbashir\source\Graph2plan\Interface\static\Data\rNum_train.npy')
+
+    paths = _MODE_PATHS[building_mode]
+    try:
+        raw = pickle.load(open(paths['train_data'], 'rb'))
+        train_data, trainNameList, trainTF = raw['data'], list(raw['nameList']), list(raw['trainTF'])
+        train_data_eNum = pickle.load(open(paths['eNum'], 'rb'))['eNum']
+        train_data_rNum = np.load(paths['rNum'])
+    except FileNotFoundError as e:
+        train_data, trainNameList, trainTF = [], [], []
+        train_data_eNum, train_data_rNum = [], None
+        print(f'[getTrainData] {building_mode} train data not found: {e}')
 
     end = time.perf_counter()
-    print('getTrainData time: %s Seconds' % (end - start))
+    print(f'getTrainData ({building_mode}) time: %s Seconds' % (end - start))
 
 
 def loadModel():
-    global model, train_data, trainNameList
+    global model
     start = time.perf_counter()
-    model = mltest.load_model()
-    end = time.perf_counter()
-    print('loadModel time: %s Seconds' % (end - start))
+    paths = _MODE_PATHS[building_mode]
+    try:
+        model = mltest.load_model(paths['model'], num_star_ratings=paths['num_star_ratings'])
+        print(f'loadModel ({building_mode}) time: {time.perf_counter() - start:.2f}s')
+    except FileNotFoundError:
+        model = None
+        print(f'[loadModel] {building_mode} model not found at {paths["model"]}')
     start = time.perf_counter()
     # Use first available training sample for warmup, or skip if none available
     if len(trainNameList) > 0:
@@ -307,8 +395,6 @@ def LoadTestBoundary(request):
     print('LoadTestBoundary time: %s Seconds' % (end - start))
     return HttpResponse(json.dumps(data_js), content_type="application/json")
 
-
-from django.views.decorators.csrf import csrf_exempt  # type: ignore
 
 @csrf_exempt
 def ParseDXFBoundary(request):

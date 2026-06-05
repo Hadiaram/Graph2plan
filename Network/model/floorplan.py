@@ -313,6 +313,13 @@ class FloorPlan():
         if tensor: coords = torch.tensor(coords).unsqueeze(0).float()
         return coords
 
+    def get_star_rating(self, tensor=True):
+        """Return the hotel star rating index (0=4-star, 1=5-star). Defaults to 0 for residential data."""
+        rating = int(getattr(self.data, 'star_rating', 0))
+        if tensor:
+            return torch.tensor(rating, dtype=torch.long)
+        return rating
+
     def get_test_data(self, tensor=True):
         name = self.data.name
 
@@ -321,7 +328,8 @@ class FloorPlan():
         rooms = self.get_rooms(tensor=tensor)
         attrs = self.get_attributes(tensor=tensor)
         triples = self.get_triples(random=False, tensor=tensor)
-        return boundary, inside_box, rooms, attrs, triples, name
+        star_rating = self.get_star_rating(tensor=tensor)
+        return boundary, inside_box, rooms, attrs, triples, star_rating, name
 
     def get_train_data(self, tensor=True):
         name = self.data.name
@@ -335,11 +343,13 @@ class FloorPlan():
         # gt
         layout = self.get_layout_image(tensor=tensor)
         boxes = self.get_boxes(tensor=tensor)
-        
+
         # constrains
         inside_coords = self.get_inside_coords(tensor=tensor)
-        
-        return boundary,inside_box,rooms,attrs,triples,layout,boxes,inside_coords,name
+
+        star_rating = self.get_star_rating(tensor=tensor)
+
+        return boundary, inside_box, rooms, attrs, triples, layout, boxes, inside_coords, star_rating, name
 
 class FloorPlanDataset(Dataset):
     def __init__(self,data_path):
@@ -371,7 +381,8 @@ def floorplan_collate_fn(batch):
     all_boxes = []
 
     all_inside_coords = []
-    
+    all_star_ratings = []
+
     all_obj_to_img = []
     all_triple_to_img = []
 
@@ -387,6 +398,7 @@ def floorplan_collate_fn(batch):
         layout,
         boxes,
         inside_coords,
+        star_rating,
         name
         ) in enumerate(batch):
         if rooms.dim() == 0 or triples.dim() == 0:
@@ -406,9 +418,10 @@ def floorplan_collate_fn(batch):
         all_layout.append(layout[None])
         all_boxes.append(boxes)
         all_inside_coords.append(inside_coords)
+        all_star_ratings.append(star_rating)
 
         all_name.append(name)
-        
+
         all_obj_to_img.append(torch.LongTensor(O).fill_(i))
         all_triple_to_img.append(torch.LongTensor(T).fill_(i))
 
@@ -424,21 +437,24 @@ def floorplan_collate_fn(batch):
     all_layout = torch.cat(all_layout)
     all_boxes = torch.cat(all_boxes)
 
+    all_star_ratings = torch.stack(all_star_ratings)  # (B,) long tensor
+
     all_obj_to_img = torch.cat(all_obj_to_img)
     all_triple_to_img = torch.cat(all_triple_to_img)
 
     out = (
         all_boundary,
-        all_inside_box, 
+        all_inside_box,
         all_objs,
-        all_attrs, 
+        all_attrs,
         all_triples,
 
-        all_layout, 
-        all_boxes, 
+        all_layout,
+        all_boxes,
 
-        all_inside_coords, 
-        
+        all_inside_coords,
+        all_star_ratings,
+
         all_obj_to_img,
         all_triple_to_img,
         all_name

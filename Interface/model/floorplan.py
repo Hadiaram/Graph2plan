@@ -106,8 +106,8 @@ class FloorPlan():
         triples = []
         # add edge relation
         for u, v, _ in self.data.edge:
-            uy0, ux0, uy1, ux1 = boxes[u]
-            vy0, vx0, vy1, vx1 = boxes[v]
+            uy0, ux0, uy1, ux1 = boxes[int(u)]
+            vy0, vx0, vy1, vx1 = boxes[int(v)]
             uc = (uy0 + uy1) / 2, (ux0 + ux1) / 2
             vc = (vy0 + vy1) / 2, (vx0 + vx1) / 2
 

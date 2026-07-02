@@ -6,6 +6,8 @@ var Type = "";
 var adjust_graph = false;
 var createNewLine = false;
 var isTrans = 0;
+var _hdRooms = null;    // boundary selection — set when a train thumbnail is clicked
+var _hdRoomID = null;   // train house ID   — set when a train thumbnail is clicked
 var islLoadTest = 0;
 var selectRect;
 var dragging_circle = null; // Track the currently dragging circle
@@ -430,6 +432,8 @@ function ListBox(ret, rooms, metadata) {
             console.time('time');
             console.log(this.id.split("_")[1]);
             var Rightid = this.id.split("_")[1];
+            _hdRooms  = rooms;
+            _hdRoomID = Rightid;
             CreateRightImage(Rightid);
             // Store roomID in cookie for reset functionality
             document.cookie = "roomID=" + Rightid;
@@ -664,6 +668,45 @@ function LoadTestBoundary(files) {
     d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
 
     NumSearch();
+}
+
+function CreateHDPlan(polygons, roomNames, exterior, door) {
+    d3.select('body').select('#LeftLayoutSVG').selectAll("svg > *").remove();
+
+    var border = 3;
+
+    d3.select("#LeftLayoutSVG").append("clipPath")
+        .attr("id", "clip-hd")
+        .append("polygon")
+        .attr("points", exterior);
+
+    for (var i = 0; i < polygons.length; i++) {
+        var pts = polygons[i].map(function(p) { return p[0] + "," + p[1]; }).join(" ");
+        var color = roomcolor(roomNames[i]);
+        d3.select("#LeftLayoutSVG")
+            .append("polygon")
+            .attr("points", pts)
+            .attr("fill", color)
+            .attr("stroke", d3.rgb(80, 80, 80))
+            .attr("stroke-width", border)
+            .attr("clip-path", "url(#clip-hd)")
+            .append("title").text(roomNames[i]);
+    }
+
+    d3.select("#LeftLayoutSVG")
+        .append("polygon")
+        .attr("class", "exterior-boundary")
+        .attr("points", exterior)
+        .attr("fill", "none")
+        .attr("stroke", roomcolor("Exterior wall"))
+        .attr("stroke-width", border + 1);
+
+    var doorParts = door.split(",");
+    d3.select('#LeftLayoutSVG').append('line')
+        .attr("x1", doorParts[0]).attr("y1", doorParts[1])
+        .attr("x2", doorParts[2]).attr("y2", doorParts[3])
+        .attr("stroke", roomcolor("Front door"))
+        .attr("stroke-width", border + 1);
 }
 
 function CreateLeftPlan(roombx, hsex, door, windows, indoor, windowsline, rmsize) {
@@ -2082,6 +2125,50 @@ function CreateLeftGraph(rooms, roomID) {
     d3.select('body').select('#LeftGraphSVG').attr("transform", "scale(1.5)");
 
 }
+
+// Generate HD handler — registered once after DOM ready; uses module-level _hdRooms / _hdRoomID
+// set whenever the user selects a training-house thumbnail (no Transfer click required).
+$(document).ready(function () {
+    document.getElementById("GenerateHD").onclick = function () {
+        if (!_hdRooms || !_hdRoomID) {
+            alert("Please select a training house from the list first.");
+            return;
+        }
+        var btn = document.getElementById("GenerateHD");
+        btn.textContent = "Sampling…";
+        btn.style.backgroundColor = "#616161";
+        $.get("/index/GenerateHD/", {
+            'userRoomID': _hdRooms.toString().split(',')[0],
+            'adptRoomID': _hdRoomID
+        }, function (r) {
+            if (r.error) {
+                alert("HouseDiffusion error: " + r.error);
+                btn.textContent = "Generate HD";
+                btn.style.backgroundColor = "#4a148c";
+                return;
+            }
+            CreateHDPlan(r.polygons, r.room_names, r.exterior, r.door);
+            btn.textContent = "Generate HD";
+            btn.style.backgroundColor = "#4a148c";
+            // Reveal refinement buttons (same set as Generate)
+            var ids = [
+                "exportDXFButton", "OptimizeLayout", "expandLivingRoom",
+                "snapRoomsButton", "alignWallsButton", "fillWallGapsButton",
+                "fillLivingRoomButton", "showOutsideButton", "logBoundariesButton",
+                "logGraphButton", "measureButton", "fixRoomsButton",
+                "adjustBoundaryButton", "enforceRoomSizesButton"
+            ];
+            ids.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) { el.style.display = "block"; }
+            });
+        }).fail(function (xhr) {
+            alert("HouseDiffusion request failed. Check server console.");
+            btn.textContent = "Generate HD";
+            btn.style.backgroundColor = "#4a148c";
+        });
+    };
+});
 
 function showGraph(oCtl) {
     // $(oCtl).is(':checked') ? d3.select("body").select("#LeftGraphSVG").attr("opacity", "1.0") : d3.select("body").select("#LeftGraphSVG").attr("opacity", "0.0");

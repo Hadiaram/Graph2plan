@@ -7,6 +7,7 @@ import os
 import random
 import model.test as mltest
 import model.utils as mdul
+import model.housediffusion_inference as hd_infer
 from model.floorplan import *
 import retrieval.retrieval as rt
 import time
@@ -1203,6 +1204,163 @@ def AdjustGraph(request):
     print(f"   → rmpos: {len(data_js.get('rmpos', []))} room positions")
     print("="*80 + "\n")
     return HttpResponse(json.dumps(data_js), content_type="application/json")
+
+
+def GenerateHD(request):
+    """
+    Run HouseDiffusion inference on the currently selected test boundary.
+
+    Uses the test data's room type list and adjacency edges as conditioning,
+    then returns polygon corner sequences in place of bounding boxes so the
+    frontend can render proper room shapes.
+    """
+    testname  = request.GET.get('userRoomID', '').split('.')[0]
+    trainname = request.GET.get('adptRoomID', '').split('.')[0]
+
+    if not testname or testname not in testNameList:
+        return JsonResponse({'error': 'No test boundary selected.'}, status=400)
+    if not trainname or trainname not in trainNameList:
+        return JsonResponse({'error': 'No train template selected.'}, status=400)
+
+    test_index  = testNameList.index(testname)
+    train_index = trainNameList.index(trainname)
+    test_entry  = test_data[test_index]
+    train_entry = train_data[train_index]
+
+    def _get(obj, *keys):
+        for k in keys:
+            if isinstance(obj, dict):
+                if k in obj:
+                    return obj[k]
+            elif hasattr(obj, k):
+                return getattr(obj, k)
+        return None
+
+    # Room types and edges come from the train template (test data only has boundary)
+    rtype_raw = _get(train_entry, 'rType', 'box')
+    if rtype_raw is None:
+        return JsonResponse({'error': 'Cannot extract room types from train template.'}, status=400)
+    rtype_arr = np.array(rtype_raw)
+    if rtype_arr.ndim == 2:      # 'box' format: (M, 5), col 4 = type
+        g2p_types = list(rtype_arr[:, 4].astype(int))
+    else:
+        g2p_types = list(rtype_arr.astype(int).flatten())
+
+    edge_raw = _get(train_entry, 'rEdge', 'edge')
+    edges = np.array(edge_raw).tolist() if edge_raw is not None else []
+
+    boundary = (
+        user_edited_boundary if user_edited_boundary is not None
+        else np.array(test_entry.boundary)
+    )
+
+    # ── Logic layer (hotel mode only) — allocate slot bounding boxes ──────────
+    slot_polygons = None
+    if building_mode == 'hotel':
+        try:
+            from model import hotel_logic_layer as _hll
+            _rbounds = getattr(train_entry, 'rBoundary', None)
+            _bay_w = (
+                _hll.infer_bay_width(_rbounds)
+                if _rbounds else _hll.DEFAULT_BAY_WIDTH_PX
+            )
+            _slots = _hll.allocate_hotel_slots(boundary, g2p_types, bay_width_px=_bay_w)
+            if _slots is not None:
+                slot_polygons = _hll.slots_to_polygons(_slots)
+                print(f'[GenerateHD] Logic layer allocated {len(_slots)} slots '
+                      f'(bay_width={_bay_w:.1f}px)')
+            else:
+                print('[GenerateHD] Logic layer returned None — using unconstrained generation')
+        except Exception as _le:
+            print(f'[GenerateHD] Logic layer error (falling back): {_le}')
+
+    try:
+        if slot_polygons is not None:
+            polygons, rplan_types, room_names = hd_infer.generate_guided(
+                g2p_types, edges, slot_polygons
+            )
+        else:
+            polygons, rplan_types, room_names = hd_infer.generate(g2p_types, edges)
+    except Exception as ex:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(ex)}, status=500)
+
+    # ── Post-generation rescaling (hotel mode) ────────────────────────────────
+    # HouseDiffusion generates in a fixed [-1,1] → [0,255] coordinate space
+    # with no awareness of the user's boundary.  For hotel floors the generated
+    # rooms cluster at residential scale and don't fill the boundary.  This pass
+    # computes the bounding box of all generated polygons and applies an affine
+    # scale+translate so the layout fills the boundary extents.
+    if building_mode == 'hotel' and polygons:
+        try:
+            _all_pts = [(x, y) for poly in polygons for x, y in poly]
+            _gx0 = min(p[0] for p in _all_pts)
+            _gx1 = max(p[0] for p in _all_pts)
+            _gy0 = min(p[1] for p in _all_pts)
+            _gy1 = max(p[1] for p in _all_pts)
+            _gw, _gh = _gx1 - _gx0, _gy1 - _gy0
+            if _gw > 0 and _gh > 0:
+                _bpts  = np.array(boundary)[:, :2]
+                _bx0, _by0 = float(_bpts[:, 0].min()), float(_bpts[:, 1].min())
+                _bx1, _by1 = float(_bpts[:, 0].max()), float(_bpts[:, 1].max())
+                _sx = (_bx1 - _bx0) / _gw
+                _sy = (_by1 - _by0) / _gh
+                polygons = [
+                    [[round((_x - _gx0) * _sx + _bx0),
+                      round((_y - _gy0) * _sy + _by0)]
+                     for _x, _y in poly]
+                    for poly in polygons
+                ]
+                print(f'[GenerateHD] Rescaled polygons to boundary '
+                      f'({_bx0:.0f},{_by0:.0f})–({_bx1:.0f},{_by1:.0f})')
+        except Exception as _re:
+            print(f'[GenerateHD] Rescaling skipped: {_re}')
+
+    exterior = ' '.join(f'{boundary[i,0]},{boundary[i,1]}' for i in range(len(boundary)))
+    door     = f'{boundary[0,0]},{boundary[0,1]},{boundary[1,0]},{boundary[1,1]}'
+
+    # ── Populate last_fp_data so post-processing pipeline works ──────────────
+    # Convert RPLAN types back to G2P integer types
+    _rplan_to_g2p = {v: k for k, v in hd_infer.G2P_TO_RPLAN.items()}
+    _g2p_types_out = [_rplan_to_g2p.get(rt, 0) for rt in rplan_types]
+
+    # Derive bounding boxes from polygon extents
+    _new_box = []
+    for poly in polygons:
+        xs = [p[0] for p in poly]
+        ys = [p[1] for p in poly]
+        _new_box.append([min(xs), min(ys), max(xs), max(ys)])
+
+    import types as _types
+    _fp = _types.SimpleNamespace(
+        newBox    = np.array(_new_box,        dtype=np.float32),
+        rType     = np.array(_g2p_types_out,  dtype=np.int32),
+        rEdge     = np.zeros((0, 3),          dtype=np.float32),
+        boundary  = boundary,
+        rBoundary = [np.array(poly, dtype=np.float32) for poly in polygons],
+    )
+    try:
+        _fp = add_dw_fp(_fp)
+    except Exception as _e:
+        # add_dw_fp requires a LivingRoom; if none present skip it gracefully
+        print(f'[GenerateHD] add_dw_fp skipped: {_e}')
+        _fp.doors   = []
+        _fp.windows = []
+
+    global last_fp_data, last_testname, steps_run
+    last_fp_data  = _fp
+    last_testname = testname
+    steps_run     = set()
+    # ─────────────────────────────────────────────────────────────────────────
+
+    return JsonResponse({
+        'polygons':    polygons,
+        'room_types':  rplan_types,
+        'room_names':  room_names,
+        'exterior':    exterior,
+        'door':        door,
+    })
 
 
 def OptimizeLayout(request):

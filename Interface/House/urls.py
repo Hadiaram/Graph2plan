@@ -34,6 +34,7 @@ urlpatterns = [
     path(r'index/TransGraph_net/', views.TransGraph_net),
     path(r'index/Init/', views.Init),
     path(r'index/AdjustGraph/', views.AdjustGraph),
+    path(r'index/GenerateHD/', views.GenerateHD),
     path(r'index/AutoAdjustGraph/', views.AutoAdjustGraph),
     path(r'index/GraphSearch/', views.GraphSearch),
     path(r'index/RelBox/', views.RelBox),

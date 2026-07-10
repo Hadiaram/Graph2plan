@@ -356,13 +356,13 @@ def loadModel():
         print(f'[loadModel] {building_mode} model not found at {paths["model"]}')
     start = time.perf_counter()
     # Use first available training sample for warmup, or skip if none available
-    if len(trainNameList) > 0:
+    if model is not None and len(trainNameList) > 0:
         test = train_data[0]
         mltest.test(model, FloorPlan(test, train=True))
         end = time.perf_counter()
         print('test Model time: %s Seconds' % (end - start))
     else:
-        print('Skipping model warmup - no training data available')
+        print('Skipping model warmup - model or training data not available')
 
 
 def LoadTestBoundary(request):
@@ -371,16 +371,21 @@ def LoadTestBoundary(request):
     testName = request.GET.get('testName').split(".")[0]
     print(f"🔍 LoadTestBoundary called with testName={testName}")
 
-    # Handle case where testName doesn't exist in testNameList (e.g., old RPLAN names)
-    if testName not in testNameList:
-        print(f"Warning: Test name '{testName}' not found in testNameList. Using first test floor plan: {testNameList[0]}")
-        testName = testNameList[0]
-
-    test_index = testNameList.index(testName)
-    data = test_data[test_index]
-    # Handle both mat_struct (dict-like) and object attribute access
-    data_name = data['name'] if isinstance(data, dict) or hasattr(data, '__getitem__') else (data.name if hasattr(data, 'name') else 'unknown')
-    print(f"   → Loading test_data[{test_index}], name={data_name}, boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
+    # Resolve name: prefer test data, fall back to train data (hotel has no separate test set)
+    if testName in testNameList:
+        data = test_data[testNameList.index(testName)]
+    elif testName in trainNameList:
+        data = train_data[trainNameList.index(testName)]
+    elif len(trainNameList) > 0:
+        print(f"Warning: '{testName}' not found — using first train floor plan: {trainNameList[0]}")
+        data = train_data[0]
+    elif len(testNameList) > 0:
+        print(f"Warning: '{testName}' not found — using first test floor plan: {testNameList[0]}")
+        data = test_data[0]
+    else:
+        return JsonResponse({'error': f'No floor plans available for {building_mode} mode'}, status=404)
+    data_name = getattr(data, 'name', 'unknown')
+    print(f"   → Loaded '{data_name}', boundary shape={data.boundary.shape}, rBoundary count={len(data.rBoundary) if hasattr(data, 'rBoundary') else 'N/A'}")
 
     # Seed user_edited_boundary with the original so UpdateBoundary has a source before Generate runs
     user_edited_boundary = np.array(data.boundary, dtype=float)
@@ -685,15 +690,21 @@ def NumSearch(request):
     getTestData()
     testName = data_new[0].split(".")[0]
 
-    # Handle case where testName doesn't exist in testNameList (e.g., old RPLAN names)
-    if testName not in testNameList:
-        print(f"Warning: Test name '{testName}' not found in testNameList. Using first test floor plan: {testNameList[0]}")
-        testName = testNameList[0]
+    # Resolve name: prefer test data, fall back to train data (hotel has no separate test set)
+    if testName in testNameList:
+        data = test_data[testNameList.index(testName)]
+    elif testName in trainNameList:
+        data = train_data[trainNameList.index(testName)]
+    elif len(trainNameList) > 0:
+        print(f"Warning: '{testName}' not found — using first train floor plan: {trainNameList[0]}")
+        data = train_data[0]
+    elif len(testNameList) > 0:
+        data = test_data[0]
+    else:
+        return JsonResponse({'error': f'No floor plans available for {building_mode} mode'}, status=404)
 
-    test_index = testNameList.index(testName)
     topkList = []
     topkList.clear()
-    data = test_data[test_index]
 
    
     multi_clusters=False
